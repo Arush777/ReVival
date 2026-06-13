@@ -34,16 +34,20 @@ secondlife/
 │   └── requirements.txt
 ├── frontend/
 │   ├── pages/
-│   │   ├── index.tsx            # buyer recommendation feed
-│   │   ├── return.tsx           # returner upload flow
+│   │   ├── index.tsx            # buyer recommendation feed (hero screen)
+│   │   ├── return.tsx           # returner upload flow + exchange branch
+│   │   ├── exchange.tsx         # trade-in store credit confirmation screen
+│   │   ├── sell.tsx             # P2P community listing flow
 │   │   ├── ops.tsx              # ops/seller dashboard
 │   │   ├── product/[id].tsx     # original PDP + prevention widget
-│   │   └── refurb/[id].tsx      # refurb listing + passport
+│   │   └── refurb/[id].tsx      # refurb listing + passport + credits redemption
 │   └── components/
+│       ├── AmazonHeader.tsx     # navy #232F3E header, search bar, cart icon
 │       ├── RecommendationCard.tsx
 │       ├── TrustPassport.tsx
 │       ├── GreenImpact.tsx
-│       └── PreventionBadge.tsx
+│       ├── PreventionBadge.tsx
+│       └── CreditsRedemption.tsx
 └── README.md
 ```
 
@@ -1495,7 +1499,26 @@ Build a simple HTML file using the passport JSON + photo URLs from S3. Upload to
 
 ### Agent ⑦ — prevention.py (pure code)
 
-**Two mechanisms. Both run here.**
+**Three mechanisms. All run here.**
+
+**Mechanism 0 — Predictive prevention (run at listing creation, before any return):**
+When a new item is listed (status set to `pending`), scan `ListingFlags` for the same `listing_id`. If a flag already exists with `return_count_for_reason >= 1`, pre-attach the warning to the new listing immediately. This means the PDP widget fires on the *first* sale of a new batch, not only after a return from that batch — making prevention predictive rather than purely reactive.
+
+```python
+def predict_listing_flag(item: dict):
+    """
+    Called at item creation time (before grading).
+    If the same listing_id already has a flag from prior returns of this product,
+    carry it forward so the PDP warning fires immediately on new inventory.
+    """
+    existing_flag = get_item("ListingFlags", {"listing_id": item["listing_id"]})
+    if existing_flag and existing_flag.get("return_count_for_reason", 0) >= 1:
+        # Listing already has a known issue — flag carries over with no increment
+        # The grading agent will increment the count if this item also returns
+        pass  # flag already live; PDP widget will display it from the existing record
+```
+
+Call `predict_listing_flag(item)` in `orchestrator.process_return()` immediately after `create_item_record()`, before grading starts.
 
 **Mechanism 1 — Supply-side (Trust Passport auto-corrects listing):**
 When an item is re-listed after grading, update its listing attributes with detected (real) values:
@@ -1560,6 +1583,9 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
     # 1. Create item in DynamoDB (status=pending)
     item = create_item_record(payload)
 
+    # 1b. Predictive prevention — check if listing_id already has a known flag
+    predict_listing_flag(item)
+
     # 2. Upload photos to S3
     s3_keys = upload_photos(item["item_id"], photo_paths)
     update_item_field(item, "photo_keys", s3_keys)
@@ -1596,13 +1622,19 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
         upload_passport_html(item["item_id"], passport)
         update_item_field(item, "passport_key", f"passports/{item['item_id']}.html")
 
-    # 10. Agent ⑦ — Prevention (both mechanisms)
+    # 10. Agent ⑦ — Prevention (reactive: listing correction + flag update)
     correct_listing(item, grading)
     write_listing_flag(item, grading)
 
     # 11. Set final status
     final_status = "listed" if disp["disposition"] in ("resell", "refurbish", "exchange") else disp["disposition"]
     update_item_field(item, "status", final_status)
+
+    # 12. Seller notification (fire-and-forget stub; does not block response)
+    if final_status == "listed" and item.get("seller_id"):
+        top = item.get("matches", [{}])[0]
+        notify_seller_stub(item["item_id"], item["seller_id"], "listed",
+                           top.get("buyer_id"), top.get("re_return_risk"))
 
     return assemble_result(item)
 
@@ -1647,6 +1679,8 @@ GET    /buyers
 GET    /buyers/{buyer_id}
 GET    /buyers/{buyer_id}/recommendations?limit=10
 GET    /ops/items?status=&limit=50
+POST   /notify-seller            # seller notification stub
+POST   /credits/redeem           # green credits redemption
 ```
 
 ### Shared response rules
@@ -1952,135 +1986,396 @@ Response:
 }
 ```
 
+### POST /notify-seller
+
+Purpose: notify a seller that their item has been matched and is listed. Stub for MVP — logs to stdout. Extend to AWS SNS in production.
+
+Request body:
+```json
+{
+  "item_id": "ITM-001",
+  "seller_id": "BUY-010",
+  "event": "matched|listed|sold",
+  "top_match_buyer_id": "BUY-001",
+  "re_return_risk": 0.005,
+  "base_price_inr": 1850
+}
+```
+
+MVP implementation — log and return 200. Do not fail the orchestrator if this call errors.
+
+```python
+@app.post("/notify-seller")
+async def notify_seller(body: dict):
+    # MVP stub: log to stdout. In production, publish to SNS topic ARN from env.
+    import logging
+    logging.info(f"[notify-seller] item={body.get('item_id')} event={body.get('event')} seller={body.get('seller_id')}")
+    return {"notified": True, "channel": "log"}
+```
+
+Call `POST /notify-seller` from the orchestrator at the end of `process_return()` whenever `final_status == "listed"` and `item.get("seller_id")` is set.
+
+---
+
+### POST /credits/redeem
+
+Purpose: apply green credits as a discount on a second-life purchase.
+
+Request body:
+```json
+{
+  "buyer_id": "BUY-001",
+  "item_id": "ITM-001",
+  "credits_to_use": 50
+}
+```
+
+Rules:
+- 1 credit = ₹1 discount.
+- Max redemption per order: min(`credits_to_use`, `buyer.credit_score`, `item.base_price_inr * 0.20`). Cap at 20% of item price.
+- On success, decrement `credit_score` in Buyers and write a `CreditsLedger` row with `action: "redemption"`.
+
+Response:
+```json
+{
+  "buyer_id": "BUY-001",
+  "item_id": "ITM-001",
+  "credits_used": 50,
+  "discount_inr": 50,
+  "final_price_inr": 1800,
+  "remaining_credits": 70
+}
+```
+
+---
+
 ### Frontend page-to-endpoint map
 
 | Frontend page | Calls | Renders |
 |---|---|---|
 | `pages/index.tsx` | `GET /buyers/{NEXT_PUBLIC_DEMO_BUYER_ID}/recommendations?limit=10` | Recommendation cards, prices, credits, risks, `why_this_fits` |
-| `pages/refurb/[id].tsx` | `GET /items/{item_id}`, `GET /items/{item_id}/passport` | Refurb listing, photos, Trust Passport, green impact |
+| `pages/refurb/[id].tsx` | `GET /items/{item_id}`, `GET /items/{item_id}/passport`, `POST /credits/redeem` | Refurb listing, photos, Trust Passport, green impact, credits redemption toggle |
 | `pages/product/[id].tsx` | `GET /listings/{listing_id}/warning`, `GET /items/ITM-001` for demo Second Life option | Original PDP warning + Second Life option |
-| `pages/return.tsx` | `POST /returns` | Upload flow result: grade, route, credits, CO2 |
-| `pages/ops.tsx` | `GET /ops/items?limit=50`, optionally `GET /items/{item_id}` | Ops dashboard, top matches, mismatch flags |
+| `pages/return.tsx` | `POST /returns` | Upload flow result: grade, route, credits, CO2; branches to exchange.tsx if trade_in=true |
+| `pages/exchange.tsx` | Receives result from `POST /returns` with `trade_in=true` | Trade-in confirmation: store credit issued, nudge to spend on second-life listings |
+| `pages/sell.tsx` | `POST /community-list` | P2P seller upload form: photos, price, category; shows grading result + Trust Passport |
+| `pages/ops.tsx` | `GET /ops/items?limit=50`, optionally `GET /items/{item_id}`, `POST /notify-seller` | Ops dashboard, top matches, mismatch flags, notify-seller button |
 
 For this MVP, `pages/product/[id].tsx` can hardcode the demo refurb item `ITM-001` after fetching the warning. Do not build catalog search.
 
 ### GET /buyers/{buyer_id}/recommendations — inverted matching
+
+**Cache strategy — this is the hero screen endpoint, it must never make a live Bedrock call during demo.**
+
+Cache key: `make_cache_key("recommendations", buyer_id.encode(), sorted_item_ids_str, "v1", MODEL_ID)` where `sorted_item_ids_str` is the sorted list of candidate `item_id`s that passed Stage 1 filter. Compute this before calling Bedrock; if the candidate set has not changed since last cache, return cached rankings instantly.
+
+The seed script (Phase 8, step 7b) must call `get_recommendations(buyer_id)` for every buyer in the demo set and warm this cache. After seeding, `GET /buyers/BUY-001/recommendations` must return in < 100 ms with no Bedrock call.
 
 ```python
 def get_recommendations(buyer_id: str, limit: int = 10):
     buyer = get_item("Buyers", {"buyer_id": buyer_id})
     # Stage 1: query Items.StatusCategoryIndex once per buyer category_interest
     candidates = query_items_for_buyer(buyer)  # status=listed + category overlap; no table scan
+    sorted_item_ids_str = json.dumps(sorted([i["item_id"] for i in candidates]))
+    cache_key = make_cache_key("recommendations", buyer_id.encode(), sorted_item_ids_str, "v1", MODEL_ID)
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
     # Stage 2: same Haiku rerank, but fixed buyer, varying items
     # Run same risk formula inverted
     # Sort ascending by risk, attach per-buyer price + credits
-    # Return top `limit`
-    return ranked_items[:limit]
+    result = ranked_items[:limit]
+    cache_put(cache_key, "recommendations", result)
+    return result
 ```
 
 ---
 
 ## Phase 7 — Frontend Screens
 
+**Amazon UI/UX baseline for all screens:**
+- Header: `AmazonHeader.tsx` — `#232F3E` navy background, amazon.in logo left, search bar center, cart icon + buyer name + credits badge top-right.
+- CTA buttons: `#FF9900` orange (`Add to Cart`, `Buy Now`), `#146EB4` blue for secondary links.
+- Body background: `#EAEDED` light grey with white card panels.
+- Typography: `Amazon Ember` or fallback `Arial`, 14px body, 18px product title, bold prices in `#B12704` red.
+- Breadcrumb: `Home > Second Life > [Category]` below header.
+- Price: crossed-out original in grey, sale price in `#B12704` red, savings in green.
+- Star ratings: ★★★★☆ style with review count in `#007185` teal.
+- Badges: "Certified Refurb", "Second Life", "Prime Eligible" in Amazon yellow-orange pill style.
+- No emojis in production UI — replace with SVG icons (leaf icon for green, shield icon for Trust Passport, location pin for city).
+
+---
+
 ### Screen 1 — Buyer Recommendation Feed (HERO SCREEN) — `pages/index.tsx`
 
 ```
-┌─────────────────────────────────────────────┐
-│  🌿 Second Life                    [Riya ▼] │
-│  Your picks — certified & planet-friendly    │
-├─────────────────────────────────────────────┤
-│ ┌──────────────────────────────────────────┐│
-│ │ [photo]  Nike Air Max 270 — Grade B       ││
-│ │          ✅ Why this fits you:             ││
-│ │          "You size up in Nike — this pair  ││
-│ │           runs small, perfect for you."    ││
-│ │  ₹4,999 new → ₹1,850  🌱 +50 credits      ││
-│ │  📍 Surat · ships in 1 day · saves 4.2 kg  ││
-│ │  [View Trust Passport]  [Add to Cart]      ││
-│ └──────────────────────────────────────────┘│
-│ ┌──────────────────────────────────────────┐│
-│ │ [photo]  Rajasthani Pickle — Sealed       ││
-│ │          ✅ "You love spicy — this was     ││
-│ │           returned for being too hot."     ││
-│ │  ₹299 new → ₹179  🌱 +3 credits           ││
-│ │  📍 Chennai · ships in 1 day · saves 0.8kg ││
-│ │  [View Passport]  [Add to Cart]            ││
-│ └──────────────────────────────────────────┘│
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ [amazon.in logo]  [Search second-life products...]  [Cart 0] │
+│                                          Riya ▼  | 120 pts  │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Second Life > Picks for Riya                          │
+│                                                              │
+│ Certified Second Life — Picked for you (10 items)           │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ [photo]      Nike Air Max 270                            │ │
+│ │              [CERTIFIED REFURB] [GRADE B]                │ │
+│ │              ★★★★☆ (certified condition report)          │ │
+│ │              ~~₹9,999~~  ₹1,850  Save 82%               │ │
+│ │              [leaf] Saves 4.2 kg CO₂ · +50 credits      │ │
+│ │              [pin] Ships from Bangalore · arrives in 1d  │ │
+│ │              [shield] Why this fits you:                 │ │
+│ │              "You size up in Nike — this pair runs       │ │
+│ │               small, perfect for you."                   │ │
+│ │              [View Trust Passport]  [Add to Cart]        │ │
+│ └──────────────────────────────────────────────────────────┘ │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ [photo]      Rajasthani Laal Mirch Pickle 500g           │ │
+│ │              [GRADE A] [SEALED & UNOPENED]               │ │
+│ │              ~~₹299~~  ₹179  Save 40%                    │ │
+│ │              [leaf] Saves 0.8 kg CO₂ · +3 credits        │ │
+│ │              [pin] Ships from Bangalore · arrives in 1d  │ │
+│ │              [shield] "You love spicy — returned for     │ │
+│ │               being too hot for previous buyer."         │ │
+│ │              [View Trust Passport]  [Add to Cart]        │ │
+│ └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+**Implementation notes:**
+- Buyer name and credit balance come from `GET /buyers/{buyer_id}` on page load.
+- Each card maps directly to one item in `GET /buyers/{buyer_id}/recommendations` response; do not recompute price, credits, or risk in React.
+- "Add to Cart" links to `pages/refurb/[id].tsx` for the full purchase flow.
+
+---
 
 ### Screen 2 — Original Product Page (PDP) Prevention Widget — `pages/product/[id].tsx`
 
 ```
-┌─────────────────────────────────────────────┐
-│  Nike Air Max 270                            │
-│  ₹9,999  [Add to Cart]                       │
-│                                              │
-│ ┌──────────────────────────────────────────┐│
-│ │ ⚠️  Fit note: 23 buyers found this runs   ││
-│ │    small. Consider sizing up.             ││
-│ └──────────────────────────────────────────┘│
-│                                              │
-│ ┌──────────────────────────────────────────┐│
-│ │ 🌿 Second Life option available           ││
-│ │    Grade B · ₹1,850 · Trust Passport ✓    ││
-│ │    [View Certified Refurb →]              ││
-│ └──────────────────────────────────────────┘│
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ [Header]                                                     │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Shoes > Nike Air Max 270                              │
+│                                                              │
+│ Nike Air Max 270                          [4 photos]        │
+│ ★★★★☆ 2,341 ratings                                         │
+│ ₹9,999   [Add to Cart]  [Buy Now]                            │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ [!] FIT ALERT  23 buyers found this runs small.          │ │
+│ │     Consider ordering one size up.                       │ │
+│ │     (Based on verified return data — AI-analysed)        │ │
+│ └──────────────────────────────────────────────────────────┘ │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ [leaf] SECOND LIFE OPTION AVAILABLE                      │ │
+│ │  Grade B certified · ₹1,850 · Trust Passport included    │ │
+│ │  Save ₹8,149 vs new · ships from Bangalore               │ │
+│ │                  [View Certified Second Life →]          │ │
+│ └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+**Predictive prevention note:** the Fit Alert renders as soon as `GET /listings/{listing_id}/warning` returns `has_warning: true`, even if the current inventory unit is brand-new. It fires from the existing `ListingFlags` row written by prior returns of the same `listing_id`.
+
+---
 
 ### Screen 3 — Refurb Listing Page — `pages/refurb/[id].tsx`
 
 ```
-┌─────────────────────────────────────────────┐
-│  Nike Air Max 270 — Certified Second Life    │
-│  ⭐ Grade B                                   │
-│  ₹1,850  (₹9,999 new — save 82%)             │
-│  🌱 +50 green credits on purchase            │
-│                                              │
-│  TRUST PASSPORT                              │
-│  ┌──────────────────────────────────────────┐│
-│  │ Summary: Grade B · 1 owner · returned    ││
-│  │   for fit, not a fault                   ││
-│  │ Condition: Light heel scuff. Otherwise   ││
-│  │   excellent.                             ││
-│  │ Why returned: Ran small for prev. owner  ││
-│  │ Buying this saved: 4.2 kg CO₂            ││
-│  │ [photo 1] [photo 2]                      ││
-│  └──────────────────────────────────────────┘│
-│  [Add to Cart]                               │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ [Header]                                                     │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Second Life > Shoes > Nike Air Max 270                │
+│                                                              │
+│  [photo 1]  [photo 2]     Nike Air Max 270                  │
+│                           Certified Second Life              │
+│                           [GRADE B]  [1 PREVIOUS OWNER]     │
+│                           ★★★★☆ AI-graded condition          │
+│                                                              │
+│                           ~~₹9,999~~  ₹1,850  (save 82%)    │
+│                           [leaf] +50 green credits earned    │
+│                                                              │
+│                           USE YOUR CREDITS                   │
+│                           ┌──────────────────────────────┐  │
+│                           │ You have 120 credits (₹120)   │  │
+│                           │ Apply 50 credits → ₹1,800     │  │
+│                           │ [Toggle: Apply credits  ON]   │  │
+│                           └──────────────────────────────┘  │
+│                                                              │
+│                           [Add to Cart]  [Buy Now]          │
+│                                                              │
+│  TRUST PASSPORT                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ [shield] Grade B · 1 owner · returned for fit only   │   │
+│  │ Condition: Light heel scuff. Otherwise excellent.     │   │
+│  │ Why returned: Previous owner found fit too tight.     │   │
+│  │ [leaf] Buying this saves 4.2 kg CO₂ vs buying new.   │   │
+│  │ [View full passport →]                               │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Screen 4 — Returns Flow Interstitial — `pages/return.tsx`
+**Credits redemption:** toggling "Apply credits" calls `POST /credits/redeem` with `credits_to_use = min(buyer.credit_score, 50)`. On success, replace displayed price with `final_price_inr` from response. Max 20% discount enforced by backend.
+
+---
+
+### Screen 4 — Returns Flow — `pages/return.tsx`
+
+Two branches based on `trade_in_requested`:
+
+**Branch A — Standard return (trade_in = false):**
+```
+┌──────────────────────────────────────────────────────────────┐
+│ [Header]                                                     │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Returns > Submit Return                               │
+│                                                              │
+│  Step 1: Upload item details & photos                        │
+│  [Item name]  [Category ▼]  [Brand]  [Return reason ▼]      │
+│  [Original price]  [Size]  [Color]                           │
+│  [Upload photos — drag & drop or browse]                     │
+│                                                              │
+│  OR request trade-in credit: [ ] Trade-in for store credit  │
+│                                                              │
+│  [Submit Return →]                                          │
+│  ───────────────────────────────────────────────────────     │
+│  Step 2: Your Return Summary (shown after POST /returns)     │
+│                                                              │
+│  [leaf] Your item earns a second life                        │
+│  Grade: B  |  Route: Certified Resell                        │
+│  You earn: 42 green credits added to your account           │
+│  CO₂ saved: 4.2 kg (approx. 21 km by car)                   │
+│                                                              │
+│  [Continue with Return →]                                   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Branch B — Trade-in (trade_in = true):** redirect to `pages/exchange.tsx` after `POST /returns` responds with `disposition: "exchange"`.
+
+---
+
+### Screen 5 — Exchange / Trade-in Confirmation — `pages/exchange.tsx`
 
 ```
-┌─────────────────────────────────────────────┐
-│  Step 2 of 3: Your Return Summary            │
-│                                              │
-│  🌿 Your item earns a second life            │
-│                                              │
-│  Grade: B                                    │
-│  Route: Resell to next best owner            │
-│  You earn: 42 green credits                  │
-│  CO₂ saved: 4.2 kg (≈ 21 km by car)         │
-│                                              │
-│  [Continue with Return →]                    │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ [Header]                                                     │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Returns > Trade-in Credit Confirmed                   │
+│                                                              │
+│  [checkmark] Trade-in complete!                              │
+│                                                              │
+│  Item: Nike Air Max 270 (Grade B)                            │
+│  Trade-in value: ₹1,665 (90% of recovered value)            │
+│  Added to your Second Life credit wallet                     │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ [coin] ₹1,665 store credit                           │   │
+│  │ Valid on Second Life certified listings only         │   │
+│  │ [Browse Second Life listings →]                      │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  [leaf] CO₂ saved: 4.2 kg · +42 green credits earned        │
+│                                                              │
+│  [Back to Home]                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Screen 5 — Order Confirmation Green Impact — (add to existing order confirm)
+**Implementation note:** `exchange.tsx` receives item_id, grade, trade_in_credit_inr, co2_saved_kg, and credits from the `/returns` response (passed via router state or query param). "Browse Second Life listings →" navigates to `pages/index.tsx`.
+
+---
+
+### Screen 6 — P2P Seller Listing — `pages/sell.tsx`
 
 ```
-┌─────────────────────────────────────────────┐
-│  ✅ Order Confirmed!                          │
-│                                              │
-│  🌿 Your green impact                        │
-│  You saved 4.2 kg CO₂ by choosing            │
-│  certified second-life.                      │
-│  +50 green credits added to your account.   │
-│  Total balance: 170 credits                  │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ [Header]                                                     │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Sell > List Your Item                                 │
+│                                                              │
+│  Sell on Amazon Second Life                                  │
+│  Your item gets AI-graded and listed with a Trust Passport.  │
+│                                                              │
+│  [Item name]  [Category ▼]  [Brand]  [Condition note]        │
+│  [Your asking price ₹]  [Size]  [Color]                      │
+│  [Upload photos — min 1, max 5]                              │
+│                                                              │
+│  [List My Item →]                                           │
+│  ───────────────────────────────────────────────────────     │
+│  After grading (shown after POST /community-list):           │
+│                                                              │
+│  Grade: B  |  Your listing price: ₹2,200 APPROVED           │
+│  [shield] Trust Passport generated — buyers can see it       │
+│  [leaf] Saves 14.0 kg CO₂ · +140 credits when sold          │
+│                                                              │
+│  [View Your Listing →]  [Edit Price]                        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Implementation note:** calls `POST /community-list` with `seller_keeps_item: true`, `seller_id: buyer_id`, `listing_price_inr`. If grade is `D` or `REVIEW`, shows "Item needs review — our team will contact you" instead of approval panel.
+
+---
+
+### Screen 7 — Ops Dashboard — `pages/ops.tsx`
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ [Header — internal ops view]                                 │
+├──────────────────────────────────────────────────────────────┤
+│ Home > Ops > Item Intelligence Dashboard                     │
+│                                                              │
+│ Filter: [Status ▼ All]  [Limit ▼ 50]  [Refresh]             │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ ITM-001 · Nike Air Max 270                               │ │
+│ │ Status: listed  Grade: B  Route: resell                  │ │
+│ │ Price: ₹1,850  Original: ₹9,999                          │ │
+│ │ [!] Size mismatch: listed US10 → detected India 9        │ │
+│ │ TOP MATCH: BUY-001 Riya Shah · risk 0.5%  ✓ low risk     │ │
+│ │ vs BUY-002 Karan Mehta · risk 29%  ✗ serial returner     │ │
+│ │ CO₂: 4.2 kg · Credits: 42                                │ │
+│ │ [View Item]  [View Passport]  [Notify Seller]            │ │
+│ └──────────────────────────────────────────────────────────┘ │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ ITM-007 · FabIndia Cotton Kurta                          │ │
+│ │ Status: manual_review  Grade: C  Route: refurbish        │ │
+│ │ Reason: clasp defect — needs minor repair                │ │
+│ │ [View Item]  [Mark Resolved]                             │ │
+│ └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Implementation notes:**
+- Data from `GET /ops/items?limit=50`. Status filter sends `?status=<value>`.
+- "Notify Seller" button calls `POST /notify-seller` with `item_id`, `event: "matched"`, `top_match_buyer_id`, `re_return_risk`.
+- Risk colour coding: risk < 0.10 = green label, 0.10–0.25 = amber, > 0.25 = red.
+- "Mark Resolved" for manual_review items calls `PATCH /items/{item_id}` (simple status update, implement as needed).
+- This screen is the "intelligence reveal" in the demo — it shows the same item, two buyers, vastly different risk scores, and the mismatch flag that corrected the catalog.
+
+---
+
+### Screen 8 — Order Confirmation Green Impact — (add to existing order confirm)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ [Header]                                                     │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  [checkmark] Order Confirmed — Thank you, Riya!              │
+│  Order #402-7654321-1234567                                  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ [leaf] Your green impact                             │   │
+│  │ You saved 4.2 kg CO₂ by choosing certified          │   │
+│  │ second-life instead of buying new.                   │   │
+│  │ That's equivalent to 21 km driven by car.            │   │
+│  │                                                      │   │
+│  │ +50 green credits added.  Total: 170 credits         │   │
+│  │ Redeem credits on your next Second Life purchase.    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  [Browse more Second Life items]  [View Order Details]      │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -2098,7 +2393,10 @@ def get_recommendations(buyer_id: str, limit: int = 10):
 # 6. Upload local photos from seed/photos/ to S3 (one folder per item_id)
 # 7. Run orchestrator.process_existing_item(item_id) on each item
 #    (pre-bakes grading, matching, passports, and prevention into GradeCache/DynamoDB)
+# 7b. Call get_recommendations(buyer_id) for every buyer in buyers.json
+#     (pre-bakes inverted-matching Haiku results into GradeCache so hero screen is instant)
 # 8. Print final status, grade, disposition, top match, and passport key for each item
+# 9. Verify: GET /buyers/BUY-001/recommendations must return in <100ms (cache hit)
 ```
 
 For step 6: take 15 product photos with your phone. Name them `ITM-001/front.jpg`, etc. Place in `seed/photos/`. The seed script uploads them and sets `photo_keys` on each item.
@@ -2117,22 +2415,26 @@ For step 7: this pre-populates `GradeCache` with grades, matches, and passports.
 
 ## Phase 9 — Demo Script (record this exactly)
 
-### Demo narrative (60 seconds)
+### Demo narrative (90 seconds)
 
 **Part A — Buyer side (first 30 seconds):**
-1. Open app as **Riya (BUY-001, Surat)**.
+1. Open app as **Riya (BUY-001, Surat)**. Amazon-style navy header, "120 credits" badge.
 2. Show the recommendation feed. Top card: Nike Air Max 270, Grade B, ₹1,850, "because you size up in Nike."
-3. Tap it. Trust Passport opens. Show: "1 owner, returned for fit — not a defect. Saves 4.2 kg CO₂."
-4. Add to cart. Order confirmation shows green impact + 50 credits.
+3. Tap it. Refurb page opens — Trust Passport shows "1 owner, returned for fit — not a defect. Saves 4.2 kg CO₂."
+4. Toggle "Apply 50 credits" — price drops to ₹1,800. Add to Cart. Order confirmation shows green impact + credits balance.
 
 **Part B — Intelligence reveal (next 20 seconds):**
-5. Flip to Ops dashboard for ITM-001. Show: Grade B, mismatch flag (listed US10 → really India 9), disposition resell, matches: Riya 0.5% risk vs Karan 29% risk.
-6. Briefly show the risk formula: "same item, Riya sizes up in Nike = 0.5% vs serial returner Karan = 29%."
+5. Flip to Ops dashboard for ITM-001. Show: Grade B, size mismatch flag (listed US10 → really India 9), disposition resell, top match Riya 0.5% risk (green) vs Karan 29% risk (red). Click "Notify Seller" — logged instantly.
+6. Briefly: "Same item, Riya sizes up in Nike = 0.5% vs serial returner Karan = 29%."
 
-**Part C — Prevention loop (final 10 seconds):**
-7. Open the ORIGINAL Nike Air Max 270 product page. Show the ⚠️ badge: "23 buyers found this runs small — consider sizing up." The return taught the catalog.
+**Part C — Prevention loop (next 15 seconds):**
+7. Open the ORIGINAL Nike Air Max 270 product page. Show the Fit Alert badge: "23 buyers found this runs small — consider sizing up." The return taught the catalog — *before* the next buyer clicks Add to Cart.
 
-**One line for judges:** *"The same return that found its next best owner also corrected the listing so the next buyer never has to return it."*
+**Part D — P2P + Exchange (final 25 seconds):**
+8. Switch to `pages/sell.tsx`. Upload a photo of a second item, set price ₹2,200. "List My Item." Show grade result + Trust Passport generated.
+9. Switch to `pages/return.tsx`, check "Trade-in for store credit." Submit. Redirect to `pages/exchange.tsx` — "₹1,665 store credit added, valid on Second Life listings." Show the credit wallet.
+
+**One line for judges:** *"The same return found its next best owner, corrected the listing, earned the seller green credits, and unlocked store credit — all from a single photo upload."*
 
 ---
 
@@ -2144,14 +2446,14 @@ For step 7: this pre-populates `GradeCache` with grades, matches, and passports.
 | 1 | 1–3h | Implement `create_tables.py`, `db/dynamo.py`, `db/s3.py`; create DynamoDB tables/GSIs and S3 buckets. |
 | 2 | 3–5h | Commit reference JSON, 30 buyers, 15 items, and seed photos. Run seed validation only. |
 | 3 | 5–10h | Implement Agent ① grading with Bedrock env model ID, schema validation, deterministic cache. |
-| 4 | 10–14h | Implement Agents ④⑤⑥: disposition, pricing, green credits. |
-| 5 | 14–20h | Implement Agent ② matching using `BuyerInterestIndex`, risk formula, buyer recommendations. |
+| 4 | 10–14h | Implement Agents ④⑤⑥: disposition, pricing, green credits. Add `predict_listing_flag()` stub in prevention.py. |
+| 5 | 14–20h | Implement Agent ② matching using `BuyerInterestIndex`, risk formula, buyer recommendations with inverted-match cache key. |
 | 6 | 20–24h | Implement Agent ③ Trust Passport JSON + HTML render + S3 upload/presigned URL. |
-| 7 | 24–26h | Implement Agent ⑦ prevention: listing correction + `ListingFlags` PDP warning. |
-| 8 | 26–30h | Implement orchestrator + `/returns`, `/community-list`, `/items`, `/passport`, `/warning`, `/recommendations`, `/ops/items`. Test in FastAPI docs. |
-| 9 | 30–32h | Run `seed.py` to pre-bake all 15 items into DynamoDB/S3/GradeCache. Set `DEMO_MODE=true` after cache is warm. |
-| 10 | 32–41h | Frontend: 5 screens. Use only endpoint response fields; do not recompute backend values in React. |
-| 11 | 41–44h | End-to-end localhost test: `localhost:3000` → `localhost:8000` → AWS Bedrock/DynamoDB/S3. Fix bugs. |
-| 12 | 44–46h | Record demo video from localhost using cached results. |
+| 7 | 24–26h | Implement Agent ⑦ prevention: predictive flag check + listing correction + `ListingFlags` PDP warning. |
+| 8 | 26–30h | Implement orchestrator + all endpoints: `/returns`, `/community-list`, `/items`, `/passport`, `/warning`, `/recommendations`, `/ops/items`, `/notify-seller`, `/credits/redeem`. Test in FastAPI docs. |
+| 9 | 30–32h | Run `seed.py`: pre-bake all 15 items + all buyer recommendation caches. Verify BUY-001 recs return in <100ms. Set `DEMO_MODE=true`. |
+| 10 | 32–42h | Frontend: 8 screens (index, return+exchange branch, exchange, sell, ops, product/[id], refurb/[id] with credits toggle, order confirm). Amazon navy/orange design system. Use only endpoint response fields. |
+| 11 | 42–44h | End-to-end localhost test: `localhost:3000` → `localhost:8000` → AWS Bedrock/DynamoDB/S3. Verify exchange flow, P2P sell flow, credits redemption, ops notify-seller. Fix bugs. |
+| 12 | 44–46h | Record demo video from localhost using cached results. Cover all 3 demo parts + ops reveal + exchange path. |
 | 13 | 46–47h | Draw architecture diagram: local frontend/backend + AWS Bedrock/DynamoDB/S3 only. Write PRD sections. |
 | 14 | 47–48h | Buffer. |
