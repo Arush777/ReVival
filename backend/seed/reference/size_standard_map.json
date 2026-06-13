@@ -1,0 +1,21 @@
+{
+  "shoes": {
+    "US 6": "India 5", "US 7": "India 6", "US 8": "India 7",
+    "US 9": "India 8", "US 10": "India 9", "US 11": "India 10",
+    "EU 38": "India 5", "EU 39": "India 6", "EU 40": "India 7",
+    "EU 41": "India 8", "EU 42": "India 9", "EU 43": "India 10",
+    "EU 44": "India 9", "UK 6": "India 7", "UK 7": "India 8",
+    "UK 8": "India 9", "UK 9": "India 10"
+  },
+  "shirt": { "XS": "XS", "S": "S", "M": "M", "L": "L", "XL": "XL", "XXL": "XXL" },
+  "kurta": { "XS": "XS", "S": "S", "M": "M", "L": "L", "XL": "XL", "XXL": "XXL" },
+  "saree": { "one-size": "one-size" },
+  "jeans": { "28x30": "28", "30x30": "30", "32x30": "32", "34x32": "34", "36x32": "36" },
+  "bag": { "30L": "30L" },
+  "sunglasses": { "one-size": "one-size" },
+  "headphones": { "one-size": "one-size" },
+  "phone": { "one-size": "one-size" },
+  "appliance": { "one-size": "one-size" },
+  "kettle": { "1.5L": "1.5L" },
+  "food": { "200g": "200g", "500g": "500g" }
+}
