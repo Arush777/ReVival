@@ -1,0 +1,496 @@
+[
+  {
+    "buyer_id": "BUY-001", "name": "Riya Shah",
+    "region": "Surat", "primary_category": "shoes",
+    "lat": 21.17, "lng": 72.83,
+    "category_interests": ["shoes", "bag"],
+    "size_profile": { "shoes": "India 9", "fit_tendency": "snug", "shirt": "M" },
+    "preferences": ["Nike", "Adidas", "sizes up", "snug fit"],
+    "purchase_history": [
+      { "category": "shoes", "brand": "Nike", "kept": true },
+      { "category": "shoes", "brand": "Puma", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.04,
+    "credit_score": 120,
+    "recent_reviews": ["I always size up in Nike, fits perfectly that way", "Snug shoes feel best"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-002", "name": "Karan Mehta",
+    "region": "Delhi", "primary_category": "shoes",
+    "lat": 28.61, "lng": 77.20,
+    "category_interests": ["shoes", "shirt"],
+    "size_profile": { "shoes": "India 9", "fit_tendency": "loose", "shirt": "L" },
+    "preferences": ["loose fit", "wide toe box"],
+    "purchase_history": [
+      { "category": "shoes", "brand": "Nike", "kept": false }
+    ],
+    "return_history": [
+      { "item": "Nike shoes", "reason": "fit_too_tight" },
+      { "item": "Adidas shoes", "reason": "fit_too_tight" }
+    ],
+    "return_rate": 0.35,
+    "credit_score": 10,
+    "recent_reviews": ["Always feel tight, prefer roomier shoes"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-003", "name": "Priya Nair",
+    "region": "Chennai", "primary_category": "food",
+    "lat": 13.08, "lng": 80.27,
+    "category_interests": ["food", "appliance"],
+    "size_profile": {},
+    "preferences": ["spicy food", "extra hot", "Rajasthani cuisine"],
+    "purchase_history": [
+      { "category": "food", "brand": "Rajasthani Spices", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.02,
+    "credit_score": 200,
+    "recent_reviews": ["I love the hottest options, the spicier the better", "Ordered double the quantity"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-004", "name": "Rahul Sharma",
+    "region": "Bangalore", "primary_category": "headphones",
+    "lat": 12.97, "lng": 77.59,
+    "category_interests": ["headphones", "phone", "appliance"],
+    "size_profile": {},
+    "preferences": ["loud audio", "bass heavy", "DJ use"],
+    "purchase_history": [
+      { "category": "headphones", "brand": "JBL", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.05,
+    "credit_score": 80,
+    "recent_reviews": ["The louder the better, use them for DJ sets", "Max volume is my baseline"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-005", "name": "Neha Gupta",
+    "region": "Mumbai", "primary_category": "shirt",
+    "lat": 19.07, "lng": 72.87,
+    "category_interests": ["shirt", "kurta", "saree"],
+    "size_profile": { "shirt": "M", "condition_tolerance": "pristine_only" },
+    "preferences": ["pristine condition", "new-like", "zero defects"],
+    "purchase_history": [],
+    "return_history": [
+      { "item": "shirt", "reason": "minor_defect" },
+      { "item": "kurta", "reason": "minor_defect" }
+    ],
+    "return_rate": 0.40,
+    "credit_score": 5,
+    "recent_reviews": ["Returned because of a tiny thread pull — unacceptable for this price"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-006", "name": "Dev Kumar",
+    "region": "Delhi", "primary_category": "shoes",
+    "lat": 28.61, "lng": 77.20,
+    "category_interests": ["shoes", "bag", "shirt"],
+    "size_profile": { "shoes": "India 9", "fit_tendency": "standard" },
+    "preferences": ["Nike", "Adidas", "standard fit"],
+    "purchase_history": [
+      { "category": "shirt", "brand": "H&M", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.08,
+    "credit_score": 60,
+    "recent_reviews": ["Fits true to size usually"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-007", "name": "Anu Patel",
+    "region": "Surat", "primary_category": "shoes",
+    "lat": 21.17, "lng": 72.83,
+    "category_interests": ["shoes", "saree", "kurta"],
+    "size_profile": { "shoes": "India 8", "shirt": "S" },
+    "preferences": ["refurbished", "value for money", "eco-friendly"],
+    "purchase_history": [
+      { "category": "shoes", "brand": "Bata", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.02,
+    "credit_score": 350,
+    "recent_reviews": ["Love buying second-life products, great value"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-008", "name": "Jay Desai",
+    "region": "Ahmedabad", "primary_category": "shirt",
+    "lat": 23.02, "lng": 72.57,
+    "category_interests": ["shirt", "kurta", "shoes"],
+    "size_profile": { "shirt": "L", "shoes": "India 9" },
+    "preferences": ["budget-conscious", "deals", "near hub"],
+    "purchase_history": [],
+    "return_history": [],
+    "return_rate": 0.06,
+    "credit_score": 45,
+    "recent_reviews": ["Great deal, happy with the purchase"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-009", "name": "Meera Iyer",
+    "region": "Bangalore", "primary_category": "shoes",
+    "lat": 12.97, "lng": 77.59,
+    "category_interests": ["shoes", "bag"],
+    "size_profile": { "shoes": "India 8", "fit_tendency": "standard" },
+    "preferences": ["Nike", "Puma"],
+    "purchase_history": [
+      { "category": "shoes", "brand": "Nike", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.07,
+    "credit_score": 90,
+    "recent_reviews": ["Nike India 8 fits me perfectly"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-010", "name": "Tara Krishnan",
+    "region": "Bangalore", "primary_category": "shoes",
+    "lat": 12.97, "lng": 77.59,
+    "category_interests": ["shoes", "shirt", "phone"],
+    "size_profile": { "shoes": "India 9", "shirt": "M" },
+    "preferences": ["eco-conscious", "certified refurb", "green shopping"],
+    "purchase_history": [
+      { "category": "phone", "brand": "OnePlus", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.03,
+    "credit_score": 480,
+    "recent_reviews": ["Always choose refurb when available, saves the planet"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-011", "name": "Vikram Singh",
+    "region": "Pune", "primary_category": "laptop",
+    "lat": 18.52, "lng": 73.86,
+    "category_interests": ["laptop", "phone", "headphones"],
+    "size_profile": {},
+    "preferences": ["performance", "refurbished electronics", "value for money"],
+    "purchase_history": [
+      { "category": "laptop", "brand": "Dell", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.05,
+    "credit_score": 150,
+    "recent_reviews": ["Refurbished Dell works like new, great buy"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-012", "name": "Sunita Reddy",
+    "region": "Hyderabad", "primary_category": "saree",
+    "lat": 17.38, "lng": 78.48,
+    "category_interests": ["saree", "kurta", "bag"],
+    "size_profile": { "shirt": "M" },
+    "preferences": ["silk sarees", "traditional wear", "festive"],
+    "purchase_history": [
+      { "category": "saree", "brand": "BIBA", "kept": true },
+      { "category": "kurta", "brand": "FabIndia", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.06,
+    "credit_score": 220,
+    "recent_reviews": ["Beautiful saree, exactly as described", "Traditional wear quality is excellent"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-013", "name": "Aditya Khanna",
+    "region": "Delhi", "primary_category": "jeans",
+    "lat": 28.61, "lng": 77.20,
+    "category_interests": ["jeans", "shirt", "shoes"],
+    "size_profile": { "jeans": "32", "shirt": "L", "shoes": "India 9" },
+    "preferences": ["slim fit", "stretch denim", "dark wash"],
+    "purchase_history": [
+      { "category": "jeans", "brand": "Levi's", "kept": true }
+    ],
+    "return_history": [
+      { "item": "jeans", "reason": "fit_too_tight" }
+    ],
+    "return_rate": 0.12,
+    "credit_score": 75,
+    "recent_reviews": ["Levi's 32 fits perfectly", "Slight sizing inconsistency between styles"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-014", "name": "Pooja Bhat",
+    "region": "Bangalore", "primary_category": "appliance",
+    "lat": 12.97, "lng": 77.59,
+    "category_interests": ["appliance", "kettle", "phone"],
+    "size_profile": {},
+    "preferences": ["energy efficient", "certified refurb", "warranty"],
+    "purchase_history": [
+      { "category": "appliance", "brand": "Prestige", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.03,
+    "credit_score": 310,
+    "recent_reviews": ["Refurb appliance works perfectly, saved a lot"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-015", "name": "Rohan Kapoor",
+    "region": "Mumbai", "primary_category": "phone",
+    "lat": 19.07, "lng": 72.87,
+    "category_interests": ["phone", "headphones", "bag"],
+    "size_profile": {},
+    "preferences": ["flagship phones", "good camera", "AMOLED display"],
+    "purchase_history": [
+      { "category": "phone", "brand": "Samsung", "kept": true },
+      { "category": "headphones", "brand": "Sony", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.04,
+    "credit_score": 190,
+    "recent_reviews": ["Samsung refurb in mint condition", "Sony headphones sound fantastic"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-016", "name": "Kavya Menon",
+    "region": "Chennai", "primary_category": "kurta",
+    "lat": 13.08, "lng": 80.27,
+    "category_interests": ["kurta", "saree", "bag"],
+    "size_profile": { "shirt": "S" },
+    "preferences": ["cotton fabric", "traditional prints", "handloom"],
+    "purchase_history": [
+      { "category": "kurta", "brand": "FabIndia", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.05,
+    "credit_score": 260,
+    "recent_reviews": ["FabIndia cotton kurta is so comfortable in Chennai heat"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-017", "name": "Arjun Tiwari",
+    "region": "Kolkata", "primary_category": "shirt",
+    "lat": 22.57, "lng": 88.36,
+    "category_interests": ["shirt", "jeans", "shoes"],
+    "size_profile": { "shirt": "XL", "jeans": "34", "shoes": "India 10" },
+    "preferences": ["formal wear", "cotton blend", "solid colors"],
+    "purchase_history": [
+      { "category": "shirt", "brand": "Arrow", "kept": true }
+    ],
+    "return_history": [
+      { "item": "shirt", "reason": "size_mismatch" }
+    ],
+    "return_rate": 0.10,
+    "credit_score": 55,
+    "recent_reviews": ["XL fits well for formal occasions", "Check size charts before buying"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-018", "name": "Divya Malhotra",
+    "region": "Jaipur", "primary_category": "bag",
+    "lat": 26.91, "lng": 75.79,
+    "category_interests": ["bag", "sunglasses", "kurta"],
+    "size_profile": {},
+    "preferences": ["ethnic prints", "tote bags", "handicraft"],
+    "purchase_history": [
+      { "category": "bag", "brand": "WildCraft", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.04,
+    "credit_score": 170,
+    "recent_reviews": ["Jaipur ethnic bags are my style, love this find"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-019", "name": "Siddharth Rao",
+    "region": "Hyderabad", "primary_category": "headphones",
+    "lat": 17.38, "lng": 78.48,
+    "category_interests": ["headphones", "laptop", "phone"],
+    "size_profile": {},
+    "preferences": ["noise cancellation", "studio quality", "long battery"],
+    "purchase_history": [
+      { "category": "headphones", "brand": "Sony", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.06,
+    "credit_score": 130,
+    "recent_reviews": ["Sony WH-1000XM4 is unbeatable for noise cancellation"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-020", "name": "Nandini Joshi",
+    "region": "Pune", "primary_category": "shoes",
+    "lat": 18.52, "lng": 73.86,
+    "category_interests": ["shoes", "bag", "sunglasses"],
+    "size_profile": { "shoes": "India 6", "fit_tendency": "standard" },
+    "preferences": ["women's sports shoes", "Puma", "Reebok"],
+    "purchase_history": [
+      { "category": "shoes", "brand": "Puma", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.05,
+    "credit_score": 140,
+    "recent_reviews": ["Puma India 6 fits perfectly, very comfortable for running"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-021", "name": "Manish Verma",
+    "region": "Delhi", "primary_category": "phone",
+    "lat": 28.61, "lng": 77.20,
+    "category_interests": ["phone", "appliance", "headphones"],
+    "size_profile": {},
+    "preferences": ["budget phones", "long battery life", "stock Android"],
+    "purchase_history": [
+      { "category": "phone", "brand": "Motorola", "kept": true }
+    ],
+    "return_history": [
+      { "item": "phone", "reason": "defective" }
+    ],
+    "return_rate": 0.15,
+    "credit_score": 40,
+    "recent_reviews": ["Motorola refurb had minor screen scratch but works fine", "Battery life could be better"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-022", "name": "Lakshmi Pillai",
+    "region": "Chennai", "primary_category": "saree",
+    "lat": 13.08, "lng": 80.27,
+    "category_interests": ["saree", "kurta", "food"],
+    "size_profile": {},
+    "preferences": ["Kanjivaram silk", "traditional", "wedding occasions"],
+    "purchase_history": [
+      { "category": "saree", "brand": "BIBA", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.03,
+    "credit_score": 300,
+    "recent_reviews": ["Authentic silk saree at a fraction of retail price"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-023", "name": "Gaurav Agarwal",
+    "region": "Ahmedabad", "primary_category": "jeans",
+    "lat": 23.02, "lng": 72.57,
+    "category_interests": ["jeans", "shirt", "sunglasses"],
+    "size_profile": { "jeans": "30", "shirt": "M" },
+    "preferences": ["casual wear", "branded jeans", "slim fit"],
+    "purchase_history": [
+      { "category": "jeans", "brand": "Levi's", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.07,
+    "credit_score": 95,
+    "recent_reviews": ["30x30 Levi's fits just right for my build"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-024", "name": "Shruti Pandey",
+    "region": "Mumbai", "primary_category": "bag",
+    "lat": 19.07, "lng": 72.87,
+    "category_interests": ["bag", "sunglasses", "shoes"],
+    "size_profile": { "shoes": "India 7" },
+    "preferences": ["designer bags", "office tote", "laptop-friendly"],
+    "purchase_history": [
+      { "category": "bag", "brand": "WildCraft", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.05,
+    "credit_score": 185,
+    "recent_reviews": ["WildCraft laptop bag holds everything and still looks professional"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-025", "name": "Rajesh Nair",
+    "region": "Kolkata", "primary_category": "appliance",
+    "lat": 22.57, "lng": 88.36,
+    "category_interests": ["appliance", "kettle", "food"],
+    "size_profile": {},
+    "preferences": ["home appliances", "energy star", "durable brands"],
+    "purchase_history": [
+      { "category": "appliance", "brand": "Philips", "kept": true }
+    ],
+    "return_history": [
+      { "item": "kettle", "reason": "defective" }
+    ],
+    "return_rate": 0.13,
+    "credit_score": 50,
+    "recent_reviews": ["Philips appliance refurb was well worth it", "Defective kettle was promptly replaced"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-026", "name": "Preethi Suresh",
+    "region": "Bangalore", "primary_category": "laptop",
+    "lat": 12.97, "lng": 77.59,
+    "category_interests": ["laptop", "headphones", "bag"],
+    "size_profile": {},
+    "preferences": ["MacBook", "lightweight", "coding setup"],
+    "purchase_history": [
+      { "category": "laptop", "brand": "Apple", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.02,
+    "credit_score": 420,
+    "recent_reviews": ["Refurb MacBook Air in perfect condition, amazing deal"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-027", "name": "Varun Bose",
+    "region": "Kolkata", "primary_category": "headphones",
+    "lat": 22.57, "lng": 88.36,
+    "category_interests": ["headphones", "phone", "bag"],
+    "size_profile": {},
+    "preferences": ["wired headphones", "audiophile", "warm sound signature"],
+    "purchase_history": [
+      { "category": "headphones", "brand": "Sennheiser", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.04,
+    "credit_score": 160,
+    "recent_reviews": ["Sennheiser refurb sounds incredible, warm and detailed"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-028", "name": "Amrita Singh",
+    "region": "Jaipur", "primary_category": "kurta",
+    "lat": 26.91, "lng": 75.79,
+    "category_interests": ["kurta", "saree", "bag"],
+    "size_profile": { "shirt": "M" },
+    "preferences": ["Rajasthani prints", "block prints", "handcrafted"],
+    "purchase_history": [
+      { "category": "kurta", "brand": "FabIndia", "kept": true },
+      { "category": "saree", "brand": "BIBA", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.03,
+    "credit_score": 275,
+    "recent_reviews": ["FabIndia block print kurta is stunning", "Love Jaipur-inspired designs"],
+    "eco_preference": true
+  },
+  {
+    "buyer_id": "BUY-029", "name": "Kunal Mehta",
+    "region": "Surat", "primary_category": "shoes",
+    "lat": 21.17, "lng": 72.83,
+    "category_interests": ["shoes", "shirt", "jeans"],
+    "size_profile": { "shoes": "India 8", "shirt": "L", "jeans": "32" },
+    "preferences": ["casual shoes", "Adidas", "everyday wear"],
+    "purchase_history": [
+      { "category": "shoes", "brand": "Adidas", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.06,
+    "credit_score": 110,
+    "recent_reviews": ["Adidas India 8 is my go-to casual shoe size"],
+    "eco_preference": false
+  },
+  {
+    "buyer_id": "BUY-030", "name": "Shalini Gupta",
+    "region": "Mumbai", "primary_category": "food",
+    "lat": 19.07, "lng": 72.87,
+    "category_interests": ["food", "appliance", "kettle"],
+    "size_profile": {},
+    "preferences": ["organic food", "healthy snacks", "mild spice"],
+    "purchase_history": [
+      { "category": "food", "brand": "Organic India", "kept": true }
+    ],
+    "return_history": [],
+    "return_rate": 0.02,
+    "credit_score": 230,
+    "recent_reviews": ["Love finding sealed organic products at discounted prices"],
+    "eco_preference": true
+  }
+]
