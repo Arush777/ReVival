@@ -200,10 +200,40 @@ python-dotenv==1.0.1
 ### AWS account setup checklist
 
 1. Choose AWS region `ap-south-1`.
-2. Open Bedrock console → Model access → request/enable access for the Claude vision/text models available to the account.
-3. Create a local IAM user named `secondlife-local-dev` or use an AWS SSO profile.
-4. Attach least-privilege permissions for only Bedrock invoke, DynamoDB table access, S3 bucket access, and CloudWatch logs if needed.
-5. Create an AWS Budget alert before running seed. Suggested threshold: `$5` or `₹500`.
+2. Confirm Billing → Payments has a valid payment method. Free/credit accounts can still require a valid payment instrument before Bedrock Marketplace model subscriptions can invoke Anthropic models.
+3. Open Bedrock console → Model Catalog/Playground → complete first-time use/EULA for the Claude vision/text models available to the account. Anthropic models are third-party Marketplace models, so the first invoke can fail with `INVALID_PAYMENT_INSTRUMENT` until AWS Marketplace accepts the payment method and the Anthropic first-time-use form is complete.
+4. Create a local IAM user named `secondlife-local-dev` or use an AWS SSO profile.
+5. Attach least-privilege permissions for only Bedrock invoke, DynamoDB table access, S3 bucket access, and CloudWatch logs if needed.
+6. Create an AWS Budget alert before running seed. Suggested threshold: `$5` or `₹500`.
+
+**Model selection rule:** keep the backend model provider swappable through `.env`. Claude is preferred only if Anthropic Marketplace access works. If Claude remains blocked, keep using Bedrock models that are already callable from `secondlife-local-dev`.
+
+Tested on this AWS account in `ap-south-1`:
+- Anthropic Claude Haiku/Sonnet: catalog-visible, but blocked by Marketplace permission/subscription setup.
+- `qwen.qwen3-vl-235b-a22b`: text OK, image OK. Best quality-first vision-language candidate.
+- `apac.amazon.nova-pro-v1:0`: text OK, image OK. Best AWS-owned stable demo candidate.
+- `google.gemma-3-27b-it`: text OK, image OK. Good Google-on-Bedrock fallback.
+- `google.gemma-3-12b-it`: text OK, image OK. Cheaper local-dev fallback.
+- `mistral.mistral-large-3-675b-instruct`: text OK, but failed a basic red-image check. Use only for text if needed.
+- `global.amazon.nova-2-lite-v1:0`: text OK, but failed a basic red-image check. Avoid for image grading.
+
+Recommended defaults:
+
+```
+# Quality-first final grading:
+BEDROCK_VISION_MODEL_ID=qwen.qwen3-vl-235b-a22b
+BEDROCK_TEXT_MODEL_ID=mistral.mistral-large-3-675b-instruct
+
+# Balanced hackathon demo:
+# BEDROCK_VISION_MODEL_ID=apac.amazon.nova-pro-v1:0
+# BEDROCK_TEXT_MODEL_ID=google.gemma-3-27b-it
+
+# Cheap local-dev fallback:
+# BEDROCK_VISION_MODEL_ID=google.gemma-3-12b-it
+# BEDROCK_TEXT_MODEL_ID=google.gemma-3-12b-it
+```
+
+Backend code must call Bedrock through the `Converse` API shape or a small adapter so Claude, Qwen, Nova, Gemma, and Mistral can be swapped by changing only `.env`.
 
 ### IAM policy for local development
 
@@ -217,10 +247,12 @@ Replace `<account-id>` and bucket names before attaching.
       "Sid": "BedrockInvoke",
       "Effect": "Allow",
       "Action": [
+        "bedrock:GetFoundationModel",
+        "bedrock:ListFoundationModels",
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile",
         "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream",
-        "bedrock:Converse",
-        "bedrock:ConverseStream"
+        "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": "*"
     },
@@ -266,6 +298,21 @@ Replace `<account-id>` and bucket names before attaching.
 }
 ```
 
+If Claude access is being completed from the local CLI instead of the root/admin console, temporarily add this statement to the same IAM policy. Remove it after one successful Claude invoke because it permits Marketplace subscription actions:
+
+```json
+{
+  "Sid": "BedrockMarketplaceFirstUseOnly",
+  "Effect": "Allow",
+  "Action": [
+    "aws-marketplace:Subscribe",
+    "aws-marketplace:Unsubscribe",
+    "aws-marketplace:ViewSubscriptions"
+  ],
+  "Resource": "*"
+}
+```
+
 ### Backend `.env`
 
 Create `backend/.env`:
@@ -276,10 +323,21 @@ DEMO_MODE=true
 AWS_DEFAULT_REGION=ap-south-1
 BEDROCK_REGION=ap-south-1
 
-# Use the exact model or inference profile IDs enabled in your Bedrock account.
-# If ap-south-1 requires cross-region inference, paste the inference profile ID here.
-BEDROCK_VISION_MODEL_ID=<bedrock-claude-sonnet-vision-model-or-inference-profile-id>
-BEDROCK_TEXT_MODEL_ID=<bedrock-claude-haiku-text-model-or-inference-profile-id>
+# Preferred after Anthropic Marketplace access is active:
+# BEDROCK_VISION_MODEL_ID=global.anthropic.claude-sonnet-4-6
+# BEDROCK_TEXT_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+# Quality-first final grading:
+BEDROCK_VISION_MODEL_ID=qwen.qwen3-vl-235b-a22b
+BEDROCK_TEXT_MODEL_ID=mistral.mistral-large-3-675b-instruct
+
+# Balanced hackathon demo:
+# BEDROCK_VISION_MODEL_ID=apac.amazon.nova-pro-v1:0
+# BEDROCK_TEXT_MODEL_ID=google.gemma-3-27b-it
+
+# Cheap local-dev fallback:
+# BEDROCK_VISION_MODEL_ID=google.gemma-3-12b-it
+# BEDROCK_TEXT_MODEL_ID=google.gemma-3-12b-it
 
 DDB_TABLE_PREFIX=SecondLife
 S3_PHOTOS_BUCKET=secondlife-photos-<account-id>
