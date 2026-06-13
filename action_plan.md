@@ -283,6 +283,10 @@ Replace `<account-id>` and bucket names before attaching.
       "Action": [
         "s3:CreateBucket",
         "s3:ListBucket",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutEncryptionConfiguration",
         "s3:GetObject",
         "s3:PutObject",
         "s3:DeleteObject"
