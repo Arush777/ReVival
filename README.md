@@ -58,7 +58,7 @@ We designed a **fleet of specialized agents** rather than one monolithic AI call
 
 1. **Each agent has a clear, narrow job** — this maps to the "agent" metaphor cleanly and judges respond well to it architecturally.
 2. **Most agents are pure code** — of 7 agents, only 3 call an LLM. The other 4 are deterministic rules. This means "7 agents" doesn't mean 7× cost.
-3. **LLM does what code can't** — the LLM's job is interpreting messy natural language ("too tight," "colors off") into structured signals. Code does everything else. This separation is the key to consistency.
+3. **LLM does what code can't** — the LLM's job is interpreting product-specific evidence from images and messy natural language ("too tight," "colors off") into structured signals. Code owns normalization, validation, routing, pricing, caching, and auditability. This separation is the key to consistency.
 
 ### Why Sonnet for grading, Haiku for text
 
@@ -67,6 +67,19 @@ Grading involves **image analysis** — the quality of vision interpretation dir
 Matching and passport generation are **text reasoning tasks** — Haiku 4.5 handles these well at $0.002 per call.
 
 Never use Opus for any of these. It's 5× more expensive than Sonnet and does not accept `temperature: 0` (returns API error), which breaks our consistency strategy.
+
+### How grading stays product-general but stable
+
+The first version of grading should not hardcode "wear level <= 4 means Grade B." That looks deterministic, but it is arbitrary because a scuff on a shoe, an opened food packet, a missing phone charger, and a stained saree do not mean the same thing. The LLM should assign the condition grade using a universal resale rubric: A new-like, B light wear, C usable but visibly worn/minor repair, D not resellable, and REVIEW when evidence is weak.
+
+The deterministic layer wraps around the LLM:
+- Canonicalize images before grading: stable order, EXIF orientation, RGB JPEG, fixed size, fixed quality.
+- Send stable metadata only: category, brand, product name/title, listed attributes, return reason, and history note.
+- Force enum JSON output: no floating scores, no prose-only answers, no invented fields.
+- Let code apply only objective blockers: non-functional, safety/hygiene issue, low confidence, or missing evidence goes to D or REVIEW.
+- Cache by content hash: same canonical photos + same metadata + same rubric + same prompt + same model = same stored result.
+
+That means grading is not "hardcoded for Nike shoes." It works for any product category the demo throws at it, while the filmed demo remains stable because all seed items are pre-graded in `GradeCache`.
 
 ---
 
@@ -147,7 +160,7 @@ We changed from item-centric (assign an item to its best owner) to buyer-centric
 
 DynamoDB is the natural choice for this AWS-native demo. More importantly, it's **NoSQL/document-style** — our buyer profiles have nested arrays (return_history, preferences) and maps (size_profile) that would require 3+ joined tables in SQL. In DynamoDB it's a single record.
 
-The `RegionCategoryIndex` GSI on the Buyers table is the architectural decision that answers "how does matching scale?" — it's a DynamoDB Global Secondary Index that lets you query buyers by region + category without scanning the full table.
+The scalable matching path is a materialized `BuyerInterestIndex`: one row per buyer interest category, keyed by `category` and `region#buyer_id`. DynamoDB cannot query array elements inside `category_interests`, so this index is what lets Stage 1 retrieve category-compatible buyers without scanning the Buyers table. The Items table also has a `StatusCategoryIndex` so buyer recommendation feeds query listed items by category instead of scanning inventory.
 
 ### Why seed JSON in repo (not a real RAG vector store)
 
@@ -160,7 +173,7 @@ A real RAG/vector store is the production path (Bedrock Knowledge Base + OpenSea
 
 ### Why content-hash caching is mandatory
 
-An LLM is not bit-for-bit deterministic even at temperature 0. Running the same grading call twice can produce slightly different output. On camera, this is catastrophic — the grade might change. The content-hash cache (`GradeCache` table) provides the only **hard guarantee**: same image + same description + same prompt version = same result, always, because we never call the model for the same input twice.
+An LLM is not bit-for-bit deterministic even at temperature 0. Running the same grading call twice can produce slightly different output. On camera, this is catastrophic — the grade might change. The content-hash cache (`GradeCache` table) provides the only **hard guarantee**: same canonical images + same metadata + same rubric + same prompt version + same model = same result, always, because we never call the model for the same input twice.
 
 The cache also pre-bakes the demo: running the seed script once populates all 15 items' grades, matches, and passports into the cache. The filmed demo reads cached results — instant, $0, zero on-camera risk.
 

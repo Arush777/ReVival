@@ -53,14 +53,43 @@ secondlife/
 
 | Layer | Use exactly this |
 |---|---|
-| Backend | Python 3.11, FastAPI, uvicorn |
+| Backend | Python 3.11, FastAPI, uvicorn running locally |
 | AI | boto3, `bedrock-runtime` client, Converse API |
-| Vision model | `anthropic.claude-sonnet-4-6` |
-| Text model | `anthropic.claude-haiku-4-5-20251001` |
-| Database | AWS DynamoDB (5 tables) |
+| Vision model | Env var `BEDROCK_VISION_MODEL_ID`; recommended Claude Sonnet 4.x/4.5 vision model available in your Bedrock account |
+| Text model | Env var `BEDROCK_TEXT_MODEL_ID`; recommended Claude Haiku 4.x/4.5 text model available in your Bedrock account |
+| Database | AWS DynamoDB (6 tables) |
 | File storage | AWS S3 (2 buckets) |
-| Frontend | Next.js 14, React, shadcn/ui |
+| Frontend | Next.js 14, React, shadcn/ui running locally |
 | AWS region | `ap-south-1` (Mumbai — India-first) |
+
+---
+
+## MVP Deployment Boundary
+
+For HackOn, do **not** deploy the backend or frontend to AWS unless there is extra time. Keep the app fast, cheap, and debuggable:
+
+```
+Browser
+  -> local Next.js frontend at http://localhost:3000
+  -> local FastAPI backend at http://localhost:8000
+  -> AWS Bedrock for AI calls
+  -> AWS DynamoDB for persistent tables
+  -> AWS S3 for photos and Trust Passport HTML
+```
+
+**AWS services used in MVP:**
+- `Amazon Bedrock`: grading, matching rerank, Trust Passport generation.
+- `Amazon DynamoDB`: Items, Buyers, BuyerInterestIndex, GradeCache, ListingFlags, CreditsLedger.
+- `Amazon S3`: uploaded product photos and generated passport HTML.
+- `IAM`: one least-privilege local development user/role.
+- `CloudWatch Logs`: optional debugging if Lambda is added later; not required for local FastAPI.
+- `AWS Budgets`: cost guardrail. Create a low budget alert before running Bedrock calls.
+
+**AWS services explicitly not used in MVP:**
+- No Lambda, API Gateway, EC2, ECS, App Runner, NAT Gateway, RDS, OpenSearch, Bedrock Knowledge Base, or custom domain.
+- No backend deployment for the demo. The public demo video can run against localhost.
+
+**Why this split works:** judges still see real AWS AI, database, and storage. We avoid deployment risk during the 48-hour build.
 
 ---
 
@@ -73,43 +102,203 @@ uvicorn==0.29.0
 boto3==1.34.0
 python-multipart==0.0.9
 pillow==10.3.0
+python-dotenv==1.0.1
 ```
 
-### AWS credentials
-Set these env vars before running anything:
+### AWS account setup checklist
+
+1. Choose AWS region `ap-south-1`.
+2. Open Bedrock console → Model access → request/enable access for the Claude vision/text models available to the account.
+3. Create a local IAM user named `secondlife-local-dev` or use an AWS SSO profile.
+4. Attach least-privilege permissions for only Bedrock invoke, DynamoDB table access, S3 bucket access, and CloudWatch logs if needed.
+5. Create an AWS Budget alert before running seed. Suggested threshold: `$5` or `₹500`.
+
+### IAM policy for local development
+
+Replace `<account-id>` and bucket names before attaching.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInvoke",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:Converse",
+        "bedrock:ConverseStream"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DynamoSecondLifeTables",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:ListTables",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:ap-south-1:<account-id>:table/SecondLife-*",
+        "arn:aws:dynamodb:ap-south-1:<account-id>:table/SecondLife-*/index/*"
+      ]
+    },
+    {
+      "Sid": "S3SecondLifeBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::secondlife-photos-<account-id>",
+        "arn:aws:s3:::secondlife-photos-<account-id>/*",
+        "arn:aws:s3:::secondlife-passports-<account-id>",
+        "arn:aws:s3:::secondlife-passports-<account-id>/*"
+      ]
+    }
+  ]
+}
 ```
-AWS_ACCESS_KEY_ID=<your key>
-AWS_SECRET_ACCESS_KEY=<your secret>
+
+### Backend `.env`
+
+Create `backend/.env`:
+
+```
+APP_ENV=local
+DEMO_MODE=true
 AWS_DEFAULT_REGION=ap-south-1
+BEDROCK_REGION=ap-south-1
+
+# Use the exact model or inference profile IDs enabled in your Bedrock account.
+# If ap-south-1 requires cross-region inference, paste the inference profile ID here.
+BEDROCK_VISION_MODEL_ID=<bedrock-claude-sonnet-vision-model-or-inference-profile-id>
+BEDROCK_TEXT_MODEL_ID=<bedrock-claude-haiku-text-model-or-inference-profile-id>
+
+DDB_TABLE_PREFIX=SecondLife
+S3_PHOTOS_BUCKET=secondlife-photos-<account-id>
+S3_PASSPORTS_BUCKET=secondlife-passports-<account-id>
+
+CORS_ORIGINS=http://localhost:3000
 ```
 
-### S3 buckets to create (run once)
+Use either `AWS_PROFILE=<profile-name>` or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. Prefer `AWS_PROFILE` for local development.
+
+### Frontend `.env.local`
+
+Create `frontend/.env.local`:
+
+```
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_DEMO_BUYER_ID=BUY-001
+```
+
+### Local run commands
+
+Backend:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open:
+- Frontend: `http://localhost:3000`
+- Backend docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+
+### S3 buckets to create
+
+The seed script can create these automatically. If creating manually, use:
+
 ```
 secondlife-photos-<your-account-id>
 secondlife-passports-<your-account-id>
 ```
-Store the bucket names as env vars: `S3_PHOTOS_BUCKET`, `S3_PASSPORTS_BUCKET`.
+
+Bucket rules:
+- Region: `ap-south-1`
+- Block public access: ON
+- Server-side encryption: S3 managed keys (`AES256`)
+- Store public-facing URLs through backend presigned URLs, not public bucket policy.
 
 ---
 
 ## Phase 1 — DynamoDB Tables
 
-Create all 5 tables. PK/SK and GSIs listed below.
+Create all 6 tables. PK/SK and GSIs listed below.
+
+**Physical table names:** prefix every table with `DDB_TABLE_PREFIX`. With the default `.env`, the tables are:
+- `SecondLife-Items`
+- `SecondLife-Buyers`
+- `SecondLife-BuyerInterestIndex`
+- `SecondLife-GradeCache`
+- `SecondLife-ListingFlags`
+- `SecondLife-CreditsLedger`
+
+**Billing mode:** use `PROVISIONED`, `ReadCapacityUnits=1`, `WriteCapacityUnits=1` for every table and GSI. This is slower during seeding but safer for free-tier usage. The seed script must write serially with retries/backoff on throttling.
+
+**Helper naming rule:** application code refers to logical names (`Items`, `Buyers`) and `db/dynamo.py` maps them to physical names with:
+
+```python
+def table_name(logical_name: str) -> str:
+    return f"{os.environ.get('DDB_TABLE_PREFIX', 'SecondLife')}-{logical_name}"
+```
 
 ### Table: `Items`
 - PK: `item_id` (String)
 - No SK
+- GSI name: `StatusCategoryIndex`
+  - GSI PK: `status` (String)
+  - GSI SK: `category` (String)
+  - Use for buyer recommendation feeds: query `status="listed"` once per buyer interest category.
+- GSI name: `ListingStatusIndex`
+  - GSI PK: `listing_id` (String)
+  - GSI SK: `status` (String)
+  - Use for original PDP: show certified second-life options for the same listing family.
 
 ### Table: `Buyers`
 - PK: `buyer_id` (String)
 - GSI name: `RegionCategoryIndex`
   - GSI PK: `region` (String)
   - GSI SK: `primary_category` (String)
+- This is useful for simple ops/debug queries. Do not rely on it alone for matching, because DynamoDB cannot query array elements inside `category_interests`.
+
+### Table: `BuyerInterestIndex`
+- PK: `category` (String)
+- SK: `region_buyer_id` (String) formatted as `{region}#{buyer_id}`
+- Attributes: `buyer_id`, `region`, `return_rate`, `credit_score`
+- One row per `(buyer_id, category_interests[])`. This is the scalable Stage-1 retrieval path for matching without scanning all buyers.
 
 ### Table: `GradeCache`
 - PK: `cache_key` (String)
 - No SK
-- TTL attribute: `expires_at` (optional, set 7 days)
+- TTL attribute: omit for demo caches. Only use TTL in production if you are okay with a future re-grade.
 
 ### Table: `ListingFlags`
 - PK: `listing_id` (String)
@@ -117,7 +306,157 @@ Create all 5 tables. PK/SK and GSIs listed below.
 
 ### Table: `CreditsLedger`
 - PK: `buyer_id` (String)
-- SK: `timestamp` (String, ISO8601)
+- SK: `event_id` (String) formatted as `{timestamp_iso}#{item_id}#{action}`
+- Include `timestamp`, `item_id`, `action`, `credits`, and `co2_saved_kg` as attributes. The composite SK avoids collisions when multiple credit events happen in the same second.
+
+### create_tables.py exact contract
+
+Implement `backend/seed/create_tables.py` with this table spec. It should skip tables that already exist and wait until every table is `ACTIVE`.
+
+```python
+TABLE_SPECS = [
+    {
+        "TableName": "Items",
+        "KeySchema": [{"AttributeName": "item_id", "KeyType": "HASH"}],
+        "AttributeDefinitions": [
+            {"AttributeName": "item_id", "AttributeType": "S"},
+            {"AttributeName": "status", "AttributeType": "S"},
+            {"AttributeName": "category", "AttributeType": "S"},
+            {"AttributeName": "listing_id", "AttributeType": "S"}
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "StatusCategoryIndex",
+                "KeySchema": [
+                    {"AttributeName": "status", "KeyType": "HASH"},
+                    {"AttributeName": "category", "KeyType": "RANGE"}
+                ]
+            },
+            {
+                "IndexName": "ListingStatusIndex",
+                "KeySchema": [
+                    {"AttributeName": "listing_id", "KeyType": "HASH"},
+                    {"AttributeName": "status", "KeyType": "RANGE"}
+                ]
+            }
+        ]
+    },
+    {
+        "TableName": "Buyers",
+        "KeySchema": [{"AttributeName": "buyer_id", "KeyType": "HASH"}],
+        "AttributeDefinitions": [
+            {"AttributeName": "buyer_id", "AttributeType": "S"},
+            {"AttributeName": "region", "AttributeType": "S"},
+            {"AttributeName": "primary_category", "AttributeType": "S"}
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "RegionCategoryIndex",
+                "KeySchema": [
+                    {"AttributeName": "region", "KeyType": "HASH"},
+                    {"AttributeName": "primary_category", "KeyType": "RANGE"}
+                ]
+            }
+        ]
+    },
+    {
+        "TableName": "BuyerInterestIndex",
+        "KeySchema": [
+            {"AttributeName": "category", "KeyType": "HASH"},
+            {"AttributeName": "region_buyer_id", "KeyType": "RANGE"}
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "category", "AttributeType": "S"},
+            {"AttributeName": "region_buyer_id", "AttributeType": "S"}
+        ]
+    },
+    {
+        "TableName": "GradeCache",
+        "KeySchema": [{"AttributeName": "cache_key", "KeyType": "HASH"}],
+        "AttributeDefinitions": [{"AttributeName": "cache_key", "AttributeType": "S"}]
+    },
+    {
+        "TableName": "ListingFlags",
+        "KeySchema": [{"AttributeName": "listing_id", "KeyType": "HASH"}],
+        "AttributeDefinitions": [{"AttributeName": "listing_id", "AttributeType": "S"}]
+    },
+    {
+        "TableName": "CreditsLedger",
+        "KeySchema": [
+            {"AttributeName": "buyer_id", "KeyType": "HASH"},
+            {"AttributeName": "event_id", "KeyType": "RANGE"}
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "buyer_id", "AttributeType": "S"},
+            {"AttributeName": "event_id", "AttributeType": "S"}
+        ]
+    }
+]
+```
+
+When creating each table, use:
+
+```python
+ProvisionedThroughput={"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}
+BillingMode="PROVISIONED"
+```
+
+When creating each GSI, use:
+
+```python
+Projection={"ProjectionType": "ALL"}
+ProvisionedThroughput={"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}
+```
+
+Do not use DynamoDB scans in production paths. Scans are allowed only in `GET /buyers` for ops/debug and in seed validation.
+
+### How the tables connect
+
+```text
+Items.item_id
+  -> S3 photos in S3_PHOTOS_BUCKET at photos/{item_id}/...
+  -> S3 passport in S3_PASSPORTS_BUCKET at passports/{item_id}.html
+  -> matches[] contains top buyer_ids from Buyers
+  -> listing_id points to ListingFlags for PDP prevention
+
+Buyers.buyer_id
+  -> duplicated into BuyerInterestIndex once per category_interests[] entry
+  -> used by matching and recommendation endpoints
+  -> CreditsLedger partition key when buyer earns/redeems green credits
+
+BuyerInterestIndex.category
+  -> Stage-1 matching query for item-centric matching
+  -> returns buyer_id values to BatchGet from Buyers
+
+GradeCache.cache_key
+  -> stores raw/final LLM outputs for grading, matching, passport
+  -> guarantees same demo input returns same result
+
+ListingFlags.listing_id
+  -> read by original PDP page to show return-prevention warning
+
+CreditsLedger.buyer_id
+  -> audit trail of credits and trade-in credit events
+```
+
+### S3 object layout
+
+Use two private buckets:
+
+```text
+S3_PHOTOS_BUCKET/
+  photos/{item_id}/front.jpg
+  photos/{item_id}/side.jpg
+  photos/{item_id}/back.jpg
+
+S3_PASSPORTS_BUCKET/
+  passports/{item_id}.html
+```
+
+The backend returns presigned URLs to the frontend:
+- Photo URLs expire in 15 minutes.
+- Passport HTML URL expires in 15 minutes.
+- Never make buckets public for the demo.
 
 ---
 
@@ -136,7 +475,17 @@ Place these files in `backend/seed/reference/`.
     "EU 44": "India 9", "UK 6": "India 7", "UK 7": "India 8",
     "UK 8": "India 9", "UK 9": "India 10"
   },
-  "shirt": { "XS": "XS", "S": "S", "M": "M", "L": "L", "XL": "XL", "XXL": "XXL" }
+  "shirt": { "XS": "XS", "S": "S", "M": "M", "L": "L", "XL": "XL", "XXL": "XXL" },
+  "kurta": { "XS": "XS", "S": "S", "M": "M", "L": "L", "XL": "XL", "XXL": "XXL" },
+  "saree": { "one-size": "one-size" },
+  "jeans": { "28x30": "28", "30x30": "30", "32x30": "32", "34x32": "34", "36x32": "36" },
+  "bag": { "30L": "30L" },
+  "sunglasses": { "one-size": "one-size" },
+  "headphones": { "one-size": "one-size" },
+  "phone": { "one-size": "one-size" },
+  "appliance": { "one-size": "one-size" },
+  "kettle": { "1.5L": "1.5L" },
+  "food": { "200g": "200g", "500g": "500g" }
 }
 ```
 
@@ -145,12 +494,14 @@ Place these files in `backend/seed/reference/`.
 {
   "shoes":     { "manufacturing_kg_co2": 14.0, "weight_kg": 0.8 },
   "shirt":     { "manufacturing_kg_co2": 7.0,  "weight_kg": 0.3 },
+  "jeans":     { "manufacturing_kg_co2": 20.0, "weight_kg": 0.7 },
   "kurta":     { "manufacturing_kg_co2": 6.0,  "weight_kg": 0.4 },
   "saree":     { "manufacturing_kg_co2": 8.0,  "weight_kg": 0.6 },
   "phone":     { "manufacturing_kg_co2": 70.0, "weight_kg": 0.2 },
   "laptop":    { "manufacturing_kg_co2": 300.0,"weight_kg": 2.0 },
   "appliance": { "manufacturing_kg_co2": 150.0,"weight_kg": 5.0 },
   "bag":       { "manufacturing_kg_co2": 10.0, "weight_kg": 0.5 },
+  "sunglasses":{ "manufacturing_kg_co2": 5.0,  "weight_kg": 0.1 },
   "food":      { "manufacturing_kg_co2": 2.0,  "weight_kg": 0.5 },
   "headphones":{ "manufacturing_kg_co2": 25.0, "weight_kg": 0.3 },
   "kettle":    { "manufacturing_kg_co2": 20.0, "weight_kg": 1.2 }
@@ -160,14 +511,16 @@ Place these files in `backend/seed/reference/`.
 ### demand_table.json
 ```json
 {
-  "Mumbai":    { "shoes": 0.9, "shirt": 0.8, "phone": 0.9, "bag": 0.8 },
-  "Delhi":     { "shoes": 0.8, "shirt": 0.7, "phone": 0.9, "kurta": 0.8 },
-  "Bangalore": { "shoes": 0.7, "phone": 0.95,"laptop": 0.9,"shirt": 0.6 },
-  "Surat":     { "shoes": 0.8, "saree": 0.9, "shirt": 0.7, "kurta": 0.8 },
-  "Ahmedabad": { "shoes": 0.7, "kurta": 0.9, "saree": 0.8, "bag": 0.6 },
-  "Chennai":   { "shoes": 0.7, "phone": 0.8, "saree": 0.9, "shirt": 0.6 },
-  "Pune":      { "shoes": 0.8, "phone": 0.8, "shirt": 0.7, "laptop": 0.7 },
-  "Hyderabad": { "shoes": 0.7, "phone": 0.85,"shirt": 0.7, "saree": 0.7 }
+  "Mumbai":    { "shoes": 0.9, "shirt": 0.8, "jeans": 0.8, "phone": 0.9, "appliance": 0.7, "bag": 0.8, "sunglasses": 0.8, "headphones": 0.8, "food": 0.6, "kettle": 0.6, "kurta": 0.6, "saree": 0.7 },
+  "Delhi":     { "shoes": 0.8, "shirt": 0.7, "jeans": 0.7, "phone": 0.9, "appliance": 0.8, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.8, "food": 0.7, "kettle": 0.7, "kurta": 0.8, "saree": 0.6 },
+  "Bangalore": { "shoes": 0.7, "shirt": 0.6, "jeans": 0.7, "phone": 0.95, "laptop": 0.9, "appliance": 0.8, "bag": 0.7, "sunglasses": 0.6, "headphones": 0.9, "food": 0.7, "kettle": 0.8, "kurta": 0.5, "saree": 0.5 },
+  "Surat":     { "shoes": 0.8, "shirt": 0.7, "jeans": 0.7, "phone": 0.7, "appliance": 0.6, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.6, "food": 0.6, "kettle": 0.5, "kurta": 0.8, "saree": 0.9 },
+  "Ahmedabad": { "shoes": 0.7, "shirt": 0.7, "jeans": 0.7, "phone": 0.7, "appliance": 0.6, "bag": 0.6, "sunglasses": 0.7, "headphones": 0.6, "food": 0.6, "kettle": 0.5, "kurta": 0.9, "saree": 0.8 },
+  "Chennai":   { "shoes": 0.7, "shirt": 0.6, "jeans": 0.6, "phone": 0.8, "appliance": 0.7, "bag": 0.6, "sunglasses": 0.7, "headphones": 0.7, "food": 0.8, "kettle": 0.6, "kurta": 0.6, "saree": 0.9 },
+  "Pune":      { "shoes": 0.8, "shirt": 0.7, "jeans": 0.7, "phone": 0.8, "laptop": 0.7, "appliance": 0.7, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.7, "food": 0.6, "kettle": 0.6, "kurta": 0.6, "saree": 0.6 },
+  "Hyderabad": { "shoes": 0.7, "shirt": 0.7, "jeans": 0.7, "phone": 0.85, "appliance": 0.7, "bag": 0.6, "sunglasses": 0.7, "headphones": 0.7, "food": 0.8, "kettle": 0.6, "kurta": 0.6, "saree": 0.7 },
+  "Kolkata":   { "shoes": 0.7, "shirt": 0.7, "jeans": 0.7, "phone": 0.8, "appliance": 0.7, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.7, "food": 0.8, "kettle": 0.6, "kurta": 0.7, "saree": 0.8 },
+  "Jaipur":    { "shoes": 0.7, "shirt": 0.7, "jeans": 0.6, "phone": 0.7, "appliance": 0.6, "bag": 0.6, "sunglasses": 0.8, "headphones": 0.6, "food": 0.8, "kettle": 0.5, "kurta": 0.8, "saree": 0.8 }
 }
 ```
 
@@ -361,9 +714,27 @@ Place these files in `backend/seed/reference/`.
 ]
 ```
 
-> Add 20 more buyers by prompting Claude offline: "Generate 20 diverse Indian e-commerce buyer profiles in this exact JSON format with realistic Indian names, cities, categories, size profiles, preferences, return histories, and eco preferences."
+> Add 20 more buyers by prompting Claude offline, then commit them to `buyers.json`. Do not generate buyers at runtime. Prompt: "Generate 20 diverse Indian e-commerce buyer profiles in this exact JSON format with realistic Indian names, cities, categories, size profiles, preferences, return histories, and eco preferences. Use only cities present in `city_coords.json` and categories present in `carbon_table.json`."
+
+**Seed robustness rules:**
+- Demo can run with the 10 hero buyers above, but the full filmed seed should contain 30 committed buyer records so the recommendation feed feels real.
+- Every `buyer_id` must be unique.
+- Every `region` must exist in both `city_coords.json` and `demand_table.json`.
+- Every `primary_category` and every `category_interests[]` entry must exist in `carbon_table.json`.
+- For each buyer/category interest, seed one row into `BuyerInterestIndex`.
+- `return_rate` must be between `0` and `1`; `credit_score` must be a non-negative integer.
 
 ### items.json — 15 hero records
+
+**Required item fields:** `item_id`, `listing_id`, `category`, `brand`, `name`, `listed_size`, `listed_color`, `original_price_inr`, `return_reason_code`, `return_reason_text`, `return_hub_city`, `owner_count`, `history_note`, `photo_keys`, `status`. Optional but recommended: `seller_claimed_condition` with default `"returned_open_box"`.
+
+**Item validation rules:**
+- Every `item_id` and `listing_id` must be unique.
+- Every `category` must exist in `carbon_table.json`, `demand_table.json`, and `size_standard_map.json`.
+- Every `return_hub_city` must exist in `city_coords.json`.
+- Every path in `photo_keys` must exist under `seed/photos/` before upload.
+- Food items must have `"sealed"` or `"unopened"` in `history_note`, otherwise the grading guardrail will route them to `REVIEW`.
+- Electronics/appliances with a defect return reason should route to `refurbish`, `recycle`, or `manual_review`, not straight resale.
 
 ```json
 [
@@ -490,7 +861,7 @@ Place these files in `backend/seed/reference/`.
   {
     "item_id": "ITM-009",
     "listing_id": "LST-LEVI-512-32",
-    "category": "shirt", "brand": "Levi's",
+    "category": "jeans", "brand": "Levi's",
     "name": "Levi's 512 Slim Taper Jeans",
     "listed_size": "32x30", "listed_color": "dark blue",
     "original_price_inr": 3999,
@@ -565,7 +936,7 @@ Place these files in `backend/seed/reference/`.
   {
     "item_id": "ITM-014",
     "listing_id": "LST-FASTRACK-SUNGLASS",
-    "category": "bag", "brand": "Fastrack",
+    "category": "sunglasses", "brand": "Fastrack",
     "name": "Fastrack Aviator Sunglasses",
     "listed_size": "one-size", "listed_color": "gold-black",
     "original_price_inr": 999,
@@ -599,6 +970,90 @@ Place these files in `backend/seed/reference/`.
 
 ## Phase 4 — Agent Implementation
 
+### db/dynamo.py — DynamoDB helper contract
+
+Every module must use these helpers instead of raw table names.
+
+```python
+import os
+from decimal import Decimal
+import boto3
+
+dynamodb = boto3.resource("dynamodb", region_name=os.environ["AWS_DEFAULT_REGION"])
+
+def table_name(logical_name: str) -> str:
+    return f"{os.environ.get('DDB_TABLE_PREFIX', 'SecondLife')}-{logical_name}"
+
+def table(logical_name: str):
+    return dynamodb.Table(table_name(logical_name))
+
+def to_ddb(value):
+    # Convert Python floats to Decimal before writing to DynamoDB.
+    pass
+
+def from_ddb(value):
+    # Convert Decimal back to int/float for FastAPI JSON responses.
+    pass
+
+def get_item(logical_table: str, key: dict) -> dict | None:
+    resp = table(logical_table).get_item(Key=to_ddb(key))
+    return from_ddb(resp.get("Item"))
+
+def put_item(logical_table: str, item: dict) -> None:
+    table(logical_table).put_item(Item=to_ddb(item))
+
+def update_item(logical_table: str, key: dict, updates: dict) -> dict:
+    # Build SET expression from updates and return updated item.
+    pass
+
+def query_index(logical_table: str, index_name: str, key_expr, expr_values: dict) -> list[dict]:
+    # Used for StatusCategoryIndex, ListingStatusIndex, RegionCategoryIndex.
+    pass
+
+def batch_get(logical_table: str, keys: list[dict]) -> list[dict]:
+    # Used after BuyerInterestIndex lookup to hydrate Buyers.
+    pass
+```
+
+### db/s3.py — S3 helper contract
+
+```python
+import os
+import boto3
+
+s3 = boto3.client("s3", region_name=os.environ["AWS_DEFAULT_REGION"])
+
+def upload_photo(item_id: str, local_path: str, filename: str) -> str:
+    key = f"photos/{item_id}/{filename}"
+    s3.upload_file(local_path, os.environ["S3_PHOTOS_BUCKET"], key, ExtraArgs={"ServerSideEncryption": "AES256"})
+    return key
+
+def upload_passport_html(item_id: str, html: str) -> str:
+    key = f"passports/{item_id}.html"
+    s3.put_object(
+        Bucket=os.environ["S3_PASSPORTS_BUCKET"],
+        Key=key,
+        Body=html.encode("utf-8"),
+        ContentType="text/html; charset=utf-8",
+        ServerSideEncryption="AES256"
+    )
+    return key
+
+def presign_photo(key: str, expires: int = 900) -> str:
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": os.environ["S3_PHOTOS_BUCKET"], "Key": key},
+        ExpiresIn=expires
+    )
+
+def presign_passport(key: str, expires: int = 900) -> str:
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": os.environ["S3_PASSPORTS_BUCKET"], "Key": key},
+        ExpiresIn=expires
+    )
+```
+
 ### cache.py — content-hash cache used by ALL three LLM agents
 
 ```python
@@ -631,66 +1086,134 @@ def cache_put(key: str, agent: str, result: dict):
 
 ### Agent ① — grading.py
 
-**Bedrock model:** `anthropic.claude-sonnet-4-6`
+**Bedrock model:** `os.environ["BEDROCK_VISION_MODEL_ID"]`
 **temperature:** 0
-**Cache:** yes — key = `make_cache_key("grading", image_bytes_concat, listed_attrs_string, "v1", MODEL_ID)`
+**Cache:** yes — key = `make_cache_key("grading", canonical_image_bytes_concat, canonical_item_json, "v2-condition-rubric", MODEL_ID)`
+
+**Important design decision:** the LLM assigns the product-specific condition grade. Code must not hardcode arbitrary category thresholds like `wear <= 4 => B`, because the product can be shoes, food, headphones, sarees, phones, appliances, or something we did not seed. Code only makes the LLM as deterministic as possible: canonical input, fixed rubric, strict schema, enum outputs, objective guardrails, and content-hash caching.
+
+**Before calling Bedrock, canonicalize the input:**
+```python
+def canonicalize_grade_input(item: dict, photo_bytes_by_name: dict[str, bytes]) -> tuple[bytes, str]:
+    """
+    Determinism starts before the model call.
+    - Sort photos by stable filename/S3 key.
+    - Apply EXIF orientation.
+    - Convert to RGB JPEG.
+    - Resize max edge to 1600px.
+    - Save with fixed JPEG quality.
+    - Serialize item metadata with sorted JSON keys.
+    """
+    pass
+```
+
+Include only stable item fields in `canonical_item_json`: `item_id`, `category`, `brand`, `name`, `listed_size`, `listed_color`, `return_reason_code`, `return_reason_text`, `history_note`, and `seller_claimed_condition` (default `"returned_open_box"` if absent). Do not include timestamps, random IDs, request IDs, or user session data.
 
 **System prompt (exact text to use):**
 ```
-You are a product-condition inspector for a returns processing system.
+You are a product-condition grader for Amazon Second Life Commerce.
 You receive one or more photos of a returned item plus what the seller's listing claimed.
-Your job is to extract OBJECTIVE observations only — no grades, no decisions.
-Respond ONLY with valid JSON matching the exact schema below.
-Use integer scales, not prose. Do not add any fields not in the schema.
+Your job is to assign the condition grade using product-specific judgment from the evidence.
+
+Use this universal resale rubric:
+A = New-like/open-box. Fully usable, no meaningful wear, no safety/hygiene issue, no critical missing part.
+B = Fully usable with light cosmetic wear or minor non-critical issues. No repair needed before resale.
+C = Usable but visibly worn, needs cleaning/minor repair, or has a non-critical missing accessory. Still safe and honest to resell/refurbish.
+D = Not currently resellable: non-functional, unsafe, expired/contaminated/open hygiene-sensitive item, major damage, counterfeit concern, or critical missing component.
+REVIEW = Evidence is insufficient or ambiguous, especially for high-value, safety-sensitive, food, beauty, or electronic items.
+
+Rules:
+- Grade the actual item shown, not the ideal catalog product.
+- Do not invent damage that is not visible or stated.
+- If photos cannot prove a safety/function claim that is necessary for resale, use REVIEW.
+- Use only the enum values in the schema. Do not output decimals or free-form scores.
+- Respond ONLY with valid JSON matching the exact schema. Do not add fields.
 ```
 
 **User message to send (build this in code):**
 ```
 Listed attributes:
+Item name: {name}
 Category: {category}
 Brand: {brand}
 Listed size: {listed_size}
 Listed color: {listed_color}
+Seller claimed condition: {seller_claimed_condition or "returned_open_box"}
+Return reason code: {return_reason_code}
+Return reason text: {return_reason_text}
+History note: {history_note}
 
-Inspect the photos and return:
+Inspect the photos and return exactly:
 {
-  "wear_level": <integer 0-10: 0=pristine, 10=heavily destroyed>,
-  "defects": [{"type": "<brief name>", "severity": <1|2|3>}],
-  "functional": <true|false>,
+  "grade": "A|B|C|D|REVIEW",
+  "grade_bucket": "new_like|light_wear|visible_wear|not_resellable|insufficient_evidence",
+  "confidence_bucket": "high|medium|low",
   "detected_category": "<string>",
+  "functional_status": "works|not_working|not_applicable|unknown",
+  "safety_or_hygiene_blocker": <true|false>,
+  "critical_missing_parts": ["<string>"],
+  "wear_level": "none|minor|moderate|heavy|unknown",
+  "defects": [{"type": "<brief name>", "severity": "minor|moderate|major", "evidence": "<visible/text evidence>"}],
   "detected_color": "<string>",
   "detected_size": "<string or 'unknown'>",
   "size_mismatch": <true|false>,
   "color_mismatch": <true|false>,
-  "mismatch_notes": "<empty string if no mismatch>"
+  "mismatch_notes": "<empty string if no mismatch>",
+  "evidence": ["<short objective observation>", "<short objective observation>"]
 }
 ```
 
-**After getting observations from Bedrock, compute grade in code (do NOT ask the model):**
+**After Bedrock returns, validate and finalize without arbitrary grading thresholds:**
 ```python
-def compute_grade(obs: dict) -> str:
-    if not obs["functional"]:
+VALID_GRADES = {"A", "B", "C", "D", "REVIEW"}
+FUNCTION_SENSITIVE = {"phone", "laptop", "appliance", "headphones", "kettle"}
+HYGIENE_SENSITIVE = {"food", "beauty", "personal_care"}
+
+def finalize_grade(item: dict, obs: dict) -> str:
+    """
+    The LLM owns A/B/C product judgment.
+    Code only applies objective blockers and evidence-quality gates.
+    """
+    grade = obs["grade"]
+    if grade not in VALID_GRADES:
+        return "REVIEW"
+
+    if obs["confidence_bucket"] == "low":
+        return "REVIEW"
+
+    if obs["safety_or_hygiene_blocker"]:
         return "D"
-    max_sev = max((d["severity"] for d in obs["defects"]), default=0)
-    w = obs["wear_level"]
-    if w <= 1 and max_sev <= 1:   return "A"
-    if w <= 4 and max_sev <= 2:   return "B"
-    if w <= 7:                     return "C"
-    return "D"
+
+    if obs["functional_status"] == "not_working":
+        return "D"
+
+    if item["category"] in FUNCTION_SENSITIVE and obs["functional_status"] == "unknown":
+        return "REVIEW"
+
+    if item["category"] in HYGIENE_SENSITIVE and obs["grade"] in {"A", "B", "C"}:
+        # Food/beauty must be clearly sealed and safe. If the model cannot prove that,
+        # do not let it quietly pass into resale.
+        sealed_or_safe = any("sealed" in e.lower() or "unopened" in e.lower() for e in obs["evidence"])
+        if not sealed_or_safe:
+            return "REVIEW"
+
+    return grade
 ```
 
 **Full function signature:**
 ```python
 def grade_item(item: dict, photo_paths: list[str]) -> dict:
-    # 1. Load photos from S3, base64-encode
-    # 2. Compute cache key
-    # 3. Return cached result if exists
-    # 4. Call Bedrock Converse with image blocks + text prompt
-    # 5. Parse JSON response
-    # 6. Compute grade via compute_grade()
-    # 7. Normalize size mismatch using size_standard_map
-    # 8. Cache result
-    # 9. Return full grading dict
+    # 1. Load photos from S3
+    # 2. Canonicalize images + stable item JSON
+    # 3. Compute cache key from canonical inputs + rubric version + model id
+    # 4. Return cached result if exists
+    # 5. Call Bedrock Converse with image blocks + exact prompt above
+    # 6. Parse JSON and validate schema/enums
+    # 7. Retry once with a JSON-repair prompt if parsing fails
+    # 8. Apply finalize_grade() objective blockers
+    # 9. Normalize size mismatch using size_standard_map where applicable
+    # 10. Cache result with prompt_version, rubric_version, model_id, and evidence
+    # 11. Return full grading dict
     pass
 ```
 
@@ -698,31 +1221,50 @@ def grade_item(item: dict, photo_paths: list[str]) -> dict:
 ```json
 {
   "grade": "B",
-  "wear_level": 3,
-  "defects": [{"type": "heel scuff", "severity": 1}],
-  "functional": true,
+  "raw_llm_grade": "B",
+  "grade_bucket": "light_wear",
+  "confidence_bucket": "high",
   "detected_category": "shoes",
+  "functional_status": "not_applicable",
+  "safety_or_hygiene_blocker": false,
+  "critical_missing_parts": [],
+  "wear_level": "minor",
+  "defects": [{"type": "heel scuff", "severity": "minor", "evidence": "small scuff visible on heel edge"}],
   "detected_color": "black",
   "detected_size": "India 9",
   "size_mismatch": true,
   "color_mismatch": false,
   "mismatch_notes": "listed US10 normalized to India9, detected India9 — match. But listing says US10 which could confuse buyers.",
-  "grade_confidence": 0.82
+  "evidence": ["sole tread is intact", "minor heel scuff", "no tear or structural damage visible"],
+  "rubric_version": "v2-condition-rubric",
+  "prompt_version": "v2",
+  "model_id": "<BEDROCK_VISION_MODEL_ID>",
+  "grader_input_hash": "<sha256>"
 }
 ```
+
+**Determinism guarantees to explain to judges:**
+- Same canonical photos + same item metadata + same prompt/rubric/model version => same cache key.
+- Cached results are never re-generated during demo.
+- LLM outputs discrete enums, not unstable 0-1 scores.
+- Code does not invent product-specific thresholds. It only blocks unsafe/unknown cases and sends ambiguous items to `REVIEW`.
+- Store `evidence`, `grader_input_hash`, `rubric_version`, and `model_id` for auditability.
 
 ---
 
 ### Agent ④ — disposition.py (pure code)
 
 ```python
-GRADE_FACTOR = {"A": 0.70, "B": 0.55, "C": 0.35, "D": 0.05}
+GRADE_FACTOR = {"A": 0.70, "B": 0.55, "C": 0.35, "D": 0.05, "REVIEW": 0.0}
 HIGH_VALUE = {"phone", "laptop", "appliance", "kettle"}
 
 def compute_disposition(item: dict, grade: str, trade_in_requested: bool = False) -> dict:
     recovered = round(item["original_price_inr"] * GRADE_FACTOR[grade])
 
-    if trade_in_requested:
+    if grade == "REVIEW":
+        route = "manual_review"
+        credit_inr = 0
+    elif trade_in_requested:
         route = "exchange"
         credit_inr = round(recovered * 0.90)  # 90% as store credit
     elif grade in ("A", "B"):
@@ -777,12 +1319,14 @@ def buyer_price(buyer: dict, base_price_inr: int, item: dict) -> int:
 
 ### Agent ② — matching.py
 
-**Bedrock model:** `anthropic.claude-haiku-4-5-20251001`
+**Bedrock model:** `os.environ["BEDROCK_TEXT_MODEL_ID"]`
 **temperature:** 0
 **Cache:** yes — key = `make_cache_key("matching", return_reason.encode(), sorted_buyer_ids_str, "v1", MODEL_ID)`
 
-**Stage 1 — Code filter (DynamoDB GSI query):**
-Query `Buyers` table using `RegionCategoryIndex` GSI. Filter: buyers in same state/region OR with `category_interests` overlapping item's category. Also filter: `size_profile.shoes` must be within 1 size of `detected_size` for footwear. Cap at 50 candidates.
+**Stage 1 — Code filter (DynamoDB query):**
+Query `BuyerInterestIndex` with `category = item["category"]`, then `BatchGetItem` the matching `buyer_id`s from `Buyers`. Prefer same-region buyers first by sorting `region_buyer_id` prefix and buyer distance; include other regions only if fewer than 50 candidates are found. Also filter: `size_profile.shoes` must be within 1 size of `detected_size` for footwear. Cap at 50 candidates.
+
+Do not scan the full `Buyers` table except in tiny local tests. DynamoDB cannot query `category_interests[]` directly, which is why `BuyerInterestIndex` exists.
 
 **Stage 2 — Haiku rerank:**
 
@@ -911,7 +1455,7 @@ def compute_credits(item: dict, grading: dict, nearest_buyer_dist_km: float) -> 
 
 ### Agent ③ — passport.py
 
-**Bedrock model:** `anthropic.claude-haiku-4-5-20251001`
+**Bedrock model:** `os.environ["BEDROCK_TEXT_MODEL_ID"]`
 **temperature:** 0
 **Run once per item. Store result. Never regenerate.**
 **Cache:** yes — key = `make_cache_key("passport", item_id.encode(), grade+str(sorted(defects))+history_note+str(co2_saved_kg), "v1", MODEL_ID)`
@@ -1001,7 +1545,7 @@ Add `POST /community-list` to `main.py`. It accepts the same payload as `POST /r
 - `seller_keeps_item: true`
 - `listing_price_inr: <user-set price>`
 
-Pipeline is identical: grading → disposition (forced to `"resell"`) → pricing (use seller price, not recovered value) → Trust Passport → prevention check. The only difference is the seller retains the item and ships directly when sold. The grading + Trust Passport is what makes P2P trusted within Amazon's ecosystem.
+Pipeline is identical: grading → disposition → pricing (use seller price if publishable) → Trust Passport → prevention check. The only difference is the seller retains the item and ships directly when sold. Do not force unsafe or ambiguous P2P items into resale: `REVIEW` goes to manual review and `D` stays blocked. The grading + Trust Passport is what makes P2P trusted within Amazon's ecosystem.
 
 No separate marketplace infra needed. The grading agent IS the trust layer.
 
@@ -1044,7 +1588,8 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
         min_dist = min(b["distance_km"] for b in ranked) if ranked else 1200
         credits_data = compute_credits(item, grading, min_dist)
         update_item_fields(item, credits_data)
-        append_credits_ledger(item.get("seller_id"), credits_data, item["item_id"])
+        if item.get("seller_id"):
+            append_credits_ledger(item["seller_id"], credits_data, item["item_id"])
 
         # 9. Agent ③ — Trust Passport
         passport = generate_passport(item, grading, credits_data)
@@ -1055,33 +1600,377 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
     correct_listing(item, grading)
     write_listing_flag(item, grading)
 
-    # 11. Set status = listed
-    update_item_field(item, "status", "listed")
+    # 11. Set final status
+    final_status = "listed" if disp["disposition"] in ("resell", "refurbish", "exchange") else disp["disposition"]
+    update_item_field(item, "status", final_status)
 
     return assemble_result(item)
+
+def process_existing_item(item_id: str, trade_in: bool = False) -> dict:
+    """
+    Used only by seed.py after items.json has already been inserted and photos uploaded.
+    Must not create a duplicate item. It loads the existing Items row, runs agents ①-⑦,
+    updates the same item_id, and returns assemble_result(item).
+    """
+    item = get_item("Items", {"item_id": item_id})
+    assert item and item["status"] == "pending"
+    assert item.get("photo_keys")
+    # Then run the same steps as process_return starting from Agent ①.
+    pass
 ```
 
 ---
 
 ## Phase 6 — API Endpoints (main.py)
 
-```python
-POST   /returns                          # run full pipeline
-POST   /community-list                   # P2P listing (same pipeline, seller keeps item)
-GET    /items/{item_id}                  # full Item record
-GET    /items/{item_id}/passport         # passport JSON + S3 URL
-GET    /listings/{listing_id}/warning    # ListingFlags row (or empty {})
-GET    /buyers/{buyer_id}/recommendations?limit=10  # personalized second-life feed
-GET    /buyers                           # ?region=&category= (for ops/debug)
+Backend base URL during hackathon: `http://localhost:8000`
+
+Frontend must read it from:
+
+```ts
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 ```
+
+Enable CORS for `http://localhost:3000` only in local demo.
+
+### Endpoint summary
+
+```python
+GET    /health
+GET    /config
+POST   /returns
+POST   /community-list
+GET    /items/{item_id}
+GET    /items/{item_id}/passport
+GET    /listings/{listing_id}/warning
+GET    /buyers
+GET    /buyers/{buyer_id}
+GET    /buyers/{buyer_id}/recommendations?limit=10
+GET    /ops/items?status=&limit=50
+```
+
+### Shared response rules
+
+- All responses are JSON except presigned S3 URLs, which are returned as strings inside JSON.
+- All money fields are integers in INR paise-free rupees, e.g. `1850`.
+- All risk scores are floats from `0.0` to `1.0`.
+- All timestamps are ISO8601 strings.
+- Errors use:
+
+```json
+{
+  "error": {
+    "code": "NOT_FOUND|VALIDATION_ERROR|AWS_ERROR|BEDROCK_CACHE_MISS|INTERNAL_ERROR",
+    "message": "human-readable message",
+    "details": {}
+  }
+}
+```
+
+If `DEMO_MODE=true`, endpoints must not make uncached Bedrock calls during frontend browsing. Seed script is allowed to create cache entries.
+
+### GET /health
+
+Purpose: frontend/dev sanity check.
+
+Response:
+
+```json
+{
+  "ok": true,
+  "service": "secondlife-backend",
+  "env": "local",
+  "aws_region": "ap-south-1"
+}
+```
+
+### GET /config
+
+Purpose: frontend can verify demo IDs.
+
+Response:
+
+```json
+{
+  "api_base_url": "http://localhost:8000",
+  "demo_buyer_id": "BUY-001",
+  "demo_item_id": "ITM-001",
+  "demo_listing_id": "LST-NIKE-AIR-270-BLK-10"
+}
+```
+
+### POST /returns
+
+Purpose: returner upload flow. Runs grading → disposition → pricing/matching/credits/passport if publishable → prevention.
+
+Content type: `multipart/form-data`
+
+Fields:
+- `payload`: JSON string matching required item fields, without `photo_keys`.
+- `photos`: one or more image files.
+- `trade_in`: optional boolean string, `"true"` or `"false"`.
+
+Minimum payload:
+
+```json
+{
+  "item_id": "ITM-UPLOAD-001",
+  "listing_id": "LST-NIKE-AIR-270-BLK-10",
+  "category": "shoes",
+  "brand": "Nike",
+  "name": "Nike Air Max 270",
+  "listed_size": "US 10",
+  "listed_color": "black",
+  "original_price_inr": 9999,
+  "return_reason_code": "fit_too_tight",
+  "return_reason_text": "Felt too tight near the toe",
+  "return_hub_city": "Bangalore",
+  "owner_count": 1,
+  "history_note": "1 owner, returned for fit only",
+  "status": "pending"
+}
+```
+
+Response:
+
+```json
+{
+  "item_id": "ITM-UPLOAD-001",
+  "status": "listed",
+  "grade": "B",
+  "disposition": "resell",
+  "base_price_inr": 1850,
+  "co2_saved_kg": 4.2,
+  "credits": 42,
+  "passport_url": "https://presigned-url",
+  "top_matches": [
+    {
+      "buyer_id": "BUY-001",
+      "name": "Riya Shah",
+      "re_return_risk": 0.005,
+      "why_this_fits": "You size up in Nike — this pair runs small."
+    }
+  ],
+  "warning_written": true
+}
+```
+
+### POST /community-list
+
+Purpose: P2P resale listing. Same input as `/returns`, plus seller fields.
+
+Content type: `multipart/form-data`
+
+Extra payload fields:
+
+```json
+{
+  "seller_id": "BUY-010",
+  "seller_keeps_item": true,
+  "listing_price_inr": 2200
+}
+```
+
+Rules:
+- If grade is `A`, `B`, or `C`, publish using `listing_price_inr`.
+- If grade is `D` or `REVIEW`, return status `manual_review` or `recycle`; do not publish.
+
+Response shape: same as `/returns`.
+
+### GET /items/{item_id}
+
+Purpose: full item detail for refurb page and ops page.
+
+Response:
+
+```json
+{
+  "item_id": "ITM-001",
+  "listing_id": "LST-NIKE-AIR-270-BLK-10",
+  "category": "shoes",
+  "brand": "Nike",
+  "name": "Nike Air Max 270",
+  "status": "listed",
+  "grade": "B",
+  "disposition": "resell",
+  "original_price_inr": 9999,
+  "base_price_inr": 1850,
+  "listed_size": "India 9",
+  "listed_color": "black",
+  "return_reason_code": "fit_too_tight",
+  "return_reason_text": "Felt too tight, especially on the sides near the toe",
+  "return_hub_city": "Bangalore",
+  "photo_urls": ["https://presigned-url"],
+  "passport_url": "https://presigned-url",
+  "co2_saved_kg": 4.2,
+  "credits": 42,
+  "matches": []
+}
+```
+
+### GET /items/{item_id}/passport
+
+Purpose: Trust Passport component.
+
+Response:
+
+```json
+{
+  "item_id": "ITM-001",
+  "passport_url": "https://presigned-url",
+  "passport": {
+    "summary": "Grade B · 1 previous owner · fit return, not a defect",
+    "condition_statement": "Light heel scuff. Otherwise structurally sound.",
+    "why_returned": "The previous buyer found the fit too tight.",
+    "buyer_reassurance": "Choosing this item saves 4.2 kg CO2e versus buying new."
+  }
+}
+```
+
+### GET /listings/{listing_id}/warning
+
+Purpose: original PDP prevention widget.
+
+Response when warning exists:
+
+```json
+{
+  "listing_id": "LST-NIKE-AIR-270-BLK-10",
+  "has_warning": true,
+  "flag_type": "size",
+  "return_count_for_reason": 23,
+  "recommendation": "Runs small — 23 buyers found this. Consider sizing up.",
+  "evidence": "Multiple fit_too_tight returns; detected size normalizes to India 9.",
+  "last_item_id": "ITM-001"
+}
+```
+
+Response when no warning exists:
+
+```json
+{
+  "listing_id": "LST-UNKNOWN",
+  "has_warning": false
+}
+```
+
+### GET /buyers
+
+Purpose: ops/debug buyer picker.
+
+Query params:
+- `region`: optional exact city/region.
+- `category`: optional interest category.
+- `limit`: default `50`.
+
+Response:
+
+```json
+{
+  "buyers": [
+    {
+      "buyer_id": "BUY-001",
+      "name": "Riya Shah",
+      "region": "Surat",
+      "primary_category": "shoes",
+      "credit_score": 120,
+      "return_rate": 0.04
+    }
+  ]
+}
+```
+
+### GET /buyers/{buyer_id}
+
+Purpose: frontend header/profile dropdown.
+
+Response: full buyer record from DynamoDB.
+
+### GET /buyers/{buyer_id}/recommendations
+
+Purpose: homepage recommendation feed.
+
+Query params:
+- `limit`: default `10`, max `25`.
+
+Response:
+
+```json
+{
+  "buyer_id": "BUY-001",
+  "items": [
+    {
+      "item_id": "ITM-001",
+      "listing_id": "LST-NIKE-AIR-270-BLK-10",
+      "brand": "Nike",
+      "name": "Nike Air Max 270",
+      "category": "shoes",
+      "grade": "B",
+      "original_price_inr": 9999,
+      "price_inr": 1850,
+      "photo_url": "https://presigned-url",
+      "passport_url": "https://presigned-url",
+      "return_hub_city": "Bangalore",
+      "ship_eta_days": 1,
+      "co2_saved_kg": 4.2,
+      "credits": 42,
+      "re_return_risk": 0.005,
+      "why_this_fits": "You size up in Nike — this pair runs small, perfect for you."
+    }
+  ]
+}
+```
+
+Frontend card must use only this response. Do not recompute price, credits, or risk in React.
+
+### GET /ops/items
+
+Purpose: ops dashboard.
+
+Query params:
+- `status`: optional, e.g. `pending`, `listed`, `manual_review`, `recycle`, `donate`.
+- `limit`: default `50`.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "ITM-001",
+      "name": "Nike Air Max 270",
+      "status": "listed",
+      "grade": "B",
+      "disposition": "resell",
+      "base_price_inr": 1850,
+      "top_match_buyer_id": "BUY-001",
+      "top_match_risk": 0.005,
+      "size_mismatch": true,
+      "color_mismatch": false
+    }
+  ]
+}
+```
+
+### Frontend page-to-endpoint map
+
+| Frontend page | Calls | Renders |
+|---|---|---|
+| `pages/index.tsx` | `GET /buyers/{NEXT_PUBLIC_DEMO_BUYER_ID}/recommendations?limit=10` | Recommendation cards, prices, credits, risks, `why_this_fits` |
+| `pages/refurb/[id].tsx` | `GET /items/{item_id}`, `GET /items/{item_id}/passport` | Refurb listing, photos, Trust Passport, green impact |
+| `pages/product/[id].tsx` | `GET /listings/{listing_id}/warning`, `GET /items/ITM-001` for demo Second Life option | Original PDP warning + Second Life option |
+| `pages/return.tsx` | `POST /returns` | Upload flow result: grade, route, credits, CO2 |
+| `pages/ops.tsx` | `GET /ops/items?limit=50`, optionally `GET /items/{item_id}` | Ops dashboard, top matches, mismatch flags |
+
+For this MVP, `pages/product/[id].tsx` can hardcode the demo refurb item `ITM-001` after fetching the warning. Do not build catalog search.
 
 ### GET /buyers/{buyer_id}/recommendations — inverted matching
 
 ```python
 def get_recommendations(buyer_id: str, limit: int = 10):
     buyer = get_item("Buyers", {"buyer_id": buyer_id})
-    # Stage 1: query listed items matching buyer's category_interests
-    candidates = query_items_for_buyer(buyer)  # filter status=listed + category overlap
+    # Stage 1: query Items.StatusCategoryIndex once per buyer category_interest
+    candidates = query_items_for_buyer(buyer)  # status=listed + category overlap; no table scan
     # Stage 2: same Haiku rerank, but fixed buyer, varying items
     # Run same risk formula inverted
     # Sort ascending by risk, attach per-buyer price + credits
@@ -1101,7 +1990,7 @@ def get_recommendations(buyer_id: str, limit: int = 10):
 │  Your picks — certified & planet-friendly    │
 ├─────────────────────────────────────────────┤
 │ ┌──────────────────────────────────────────┐│
-│ │ [photo]  Nike Air Max 270 — Grade B+      ││
+│ │ [photo]  Nike Air Max 270 — Grade B       ││
 │ │          ✅ Why this fits you:             ││
 │ │          "You size up in Nike — this pair  ││
 │ │           runs small, perfect for you."    ││
@@ -1134,7 +2023,7 @@ def get_recommendations(buyer_id: str, limit: int = 10):
 │                                              │
 │ ┌──────────────────────────────────────────┐│
 │ │ 🌿 Second Life option available           ││
-│ │    Grade B+ · ₹1,850 · Trust Passport ✓   ││
+│ │    Grade B · ₹1,850 · Trust Passport ✓    ││
 │ │    [View Certified Refurb →]              ││
 │ └──────────────────────────────────────────┘│
 └─────────────────────────────────────────────┘
@@ -1145,7 +2034,7 @@ def get_recommendations(buyer_id: str, limit: int = 10):
 ```
 ┌─────────────────────────────────────────────┐
 │  Nike Air Max 270 — Certified Second Life    │
-│  ⭐ Grade B+                                  │
+│  ⭐ Grade B                                   │
 │  ₹1,850  (₹9,999 new — save 82%)             │
 │  🌱 +50 green credits on purchase            │
 │                                              │
@@ -1171,7 +2060,7 @@ def get_recommendations(buyer_id: str, limit: int = 10):
 │                                              │
 │  🌿 Your item earns a second life            │
 │                                              │
-│  Grade: B+                                   │
+│  Grade: B                                    │
 │  Route: Resell to next best owner            │
 │  You earn: 42 green credits                  │
 │  CO₂ saved: 4.2 kg (≈ 21 km by car)         │
@@ -1201,17 +2090,28 @@ def get_recommendations(buyer_id: str, limit: int = 10):
 ### seed/seed.py — run this ONCE before demo
 
 ```python
-# 1. Create all 5 DynamoDB tables (skip if already exist)
-# 2. Load buyers.json → put all 30 buyers into Buyers table
-# 3. Load items.json → put all 15 items into Items table
-# 4. Upload local photos from seed/photos/ to S3 (one folder per item_id)
-# 5. Run orchestrator.process_return() on each item (pre-bakes all AI calls into GradeCache)
-# 6. Print final status for each item
+# 1. Create all 6 DynamoDB tables and GSIs (skip if already exist)
+# 2. Load and validate reference JSON, buyers.json, and items.json
+# 3. Put all buyers into Buyers table
+# 4. Put one row per buyer interest into BuyerInterestIndex
+# 5. Put all 15 items into Items table with status="pending"
+# 6. Upload local photos from seed/photos/ to S3 (one folder per item_id)
+# 7. Run orchestrator.process_existing_item(item_id) on each item
+#    (pre-bakes grading, matching, passports, and prevention into GradeCache/DynamoDB)
+# 8. Print final status, grade, disposition, top match, and passport key for each item
 ```
 
-For step 4: take 15 product photos with your phone. Name them `ITM-001/front.jpg`, etc. Place in `seed/photos/`. The seed script uploads them and sets `photo_keys` on each item.
+For step 6: take 15 product photos with your phone. Name them `ITM-001/front.jpg`, etc. Place in `seed/photos/`. The seed script uploads them and sets `photo_keys` on each item.
 
-For step 5: this pre-populates `GradeCache` with grades, matches, and passports. All demo reads come from cache — instant, $0, no live-call risk.
+For step 7: this pre-populates `GradeCache` with grades, matches, and passports. All demo reads come from cache — instant, $0, no live-call risk.
+
+**Seed validation must fail fast if:**
+- fewer than 10 buyers exist in demo mode, or fewer than 30 buyers exist in full-demo mode
+- any category appears in seed data but is missing from `carbon_table`, `demand_table`, or `size_standard_map`
+- any city appears in seed data but is missing from `city_coords`
+- any `photo_keys` path has no corresponding local file
+- any duplicate `item_id`, `listing_id`, or `buyer_id` exists
+- any item has `status` other than `"pending"` before processing
 
 ---
 
@@ -1221,12 +2121,12 @@ For step 5: this pre-populates `GradeCache` with grades, matches, and passports.
 
 **Part A — Buyer side (first 30 seconds):**
 1. Open app as **Riya (BUY-001, Surat)**.
-2. Show the recommendation feed. Top card: Nike Air Max 270, Grade B+, ₹1,850, "because you size up in Nike."
+2. Show the recommendation feed. Top card: Nike Air Max 270, Grade B, ₹1,850, "because you size up in Nike."
 3. Tap it. Trust Passport opens. Show: "1 owner, returned for fit — not a defect. Saves 4.2 kg CO₂."
 4. Add to cart. Order confirmation shows green impact + 50 credits.
 
 **Part B — Intelligence reveal (next 20 seconds):**
-5. Flip to Ops dashboard for ITM-001. Show: Grade B+, mismatch flag (listed US10 → really India 9), disposition resell, matches: Riya 0.5% risk vs Karan 29% risk.
+5. Flip to Ops dashboard for ITM-001. Show: Grade B, mismatch flag (listed US10 → really India 9), disposition resell, matches: Riya 0.5% risk vs Karan 29% risk.
 6. Briefly show the risk formula: "same item, Riya sizes up in Nike = 0.5% vs serial returner Karan = 29%."
 
 **Part C — Prevention loop (final 10 seconds):**
@@ -1240,18 +2140,18 @@ For step 5: this pre-populates `GradeCache` with grades, matches, and passports.
 
 | Phase | Hours | What |
 |---|---|---|
-| 0 | 0–1h | env setup, AWS credentials, S3 buckets |
-| 1 | 1–3h | DynamoDB tables created, reference JSON files in place |
-| 2 | 3–5h | Seed data: write buyers.json + items.json, collect 15 photos |
-| 3 | 5–11h | Agent ①: grading + compute_grade. Test until JSON is reliable. |
-| 4 | 11–15h | Agents ④⑤⑥: disposition + pricing + green credits (pure code) |
-| 5 | 15–21h | Agent ②: matching + risk formula + buyer recommendations |
-| 6 | 21–25h | Agent ③: Trust Passport + HTML render + S3 upload |
-| 7 | 25–27h | Agent ⑦: prevention (both mechanisms — listing correction + PDP flag) |
-| 8 | 27–29h | Orchestrator: wire all agents in order. Test golden path. |
-| 9 | 29–31h | Seed script: run full pipeline on all 15 items. Pre-bake cache. |
-| 10 | 31–41h | Frontend: 5 screens. Use shadcn/ui, wire to endpoints. |
-| 11 | 41–44h | End-to-end golden path test. Fix bugs. |
-| 12 | 44–46h | Record demo video (follow demo script above exactly). |
-| 13 | 46–47h | Draw architecture diagram. Write PRD sections. |
+| 0 | 0–1h | Create AWS Budget, enable Bedrock model access, create local IAM credentials/profile, fill `backend/.env` and `frontend/.env.local`. |
+| 1 | 1–3h | Implement `create_tables.py`, `db/dynamo.py`, `db/s3.py`; create DynamoDB tables/GSIs and S3 buckets. |
+| 2 | 3–5h | Commit reference JSON, 30 buyers, 15 items, and seed photos. Run seed validation only. |
+| 3 | 5–10h | Implement Agent ① grading with Bedrock env model ID, schema validation, deterministic cache. |
+| 4 | 10–14h | Implement Agents ④⑤⑥: disposition, pricing, green credits. |
+| 5 | 14–20h | Implement Agent ② matching using `BuyerInterestIndex`, risk formula, buyer recommendations. |
+| 6 | 20–24h | Implement Agent ③ Trust Passport JSON + HTML render + S3 upload/presigned URL. |
+| 7 | 24–26h | Implement Agent ⑦ prevention: listing correction + `ListingFlags` PDP warning. |
+| 8 | 26–30h | Implement orchestrator + `/returns`, `/community-list`, `/items`, `/passport`, `/warning`, `/recommendations`, `/ops/items`. Test in FastAPI docs. |
+| 9 | 30–32h | Run `seed.py` to pre-bake all 15 items into DynamoDB/S3/GradeCache. Set `DEMO_MODE=true` after cache is warm. |
+| 10 | 32–41h | Frontend: 5 screens. Use only endpoint response fields; do not recompute backend values in React. |
+| 11 | 41–44h | End-to-end localhost test: `localhost:3000` → `localhost:8000` → AWS Bedrock/DynamoDB/S3. Fix bugs. |
+| 12 | 44–46h | Record demo video from localhost using cached results. |
+| 13 | 46–47h | Draw architecture diagram: local frontend/backend + AWS Bedrock/DynamoDB/S3 only. Write PRD sections. |
 | 14 | 47–48h | Buffer. |
