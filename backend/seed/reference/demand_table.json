@@ -1,0 +1,12 @@
+{
+  "Mumbai":    { "shoes": 0.9, "shirt": 0.8, "jeans": 0.8, "phone": 0.9, "appliance": 0.7, "bag": 0.8, "sunglasses": 0.8, "headphones": 0.8, "food": 0.6, "kettle": 0.6, "kurta": 0.6, "saree": 0.7 },
+  "Delhi":     { "shoes": 0.8, "shirt": 0.7, "jeans": 0.7, "phone": 0.9, "appliance": 0.8, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.8, "food": 0.7, "kettle": 0.7, "kurta": 0.8, "saree": 0.6 },
+  "Bangalore": { "shoes": 0.7, "shirt": 0.6, "jeans": 0.7, "phone": 0.95, "laptop": 0.9, "appliance": 0.8, "bag": 0.7, "sunglasses": 0.6, "headphones": 0.9, "food": 0.7, "kettle": 0.8, "kurta": 0.5, "saree": 0.5 },
+  "Surat":     { "shoes": 0.8, "shirt": 0.7, "jeans": 0.7, "phone": 0.7, "appliance": 0.6, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.6, "food": 0.6, "kettle": 0.5, "kurta": 0.8, "saree": 0.9 },
+  "Ahmedabad": { "shoes": 0.7, "shirt": 0.7, "jeans": 0.7, "phone": 0.7, "appliance": 0.6, "bag": 0.6, "sunglasses": 0.7, "headphones": 0.6, "food": 0.6, "kettle": 0.5, "kurta": 0.9, "saree": 0.8 },
+  "Chennai":   { "shoes": 0.7, "shirt": 0.6, "jeans": 0.6, "phone": 0.8, "appliance": 0.7, "bag": 0.6, "sunglasses": 0.7, "headphones": 0.7, "food": 0.8, "kettle": 0.6, "kurta": 0.6, "saree": 0.9 },
+  "Pune":      { "shoes": 0.8, "shirt": 0.7, "jeans": 0.7, "phone": 0.8, "laptop": 0.7, "appliance": 0.7, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.7, "food": 0.6, "kettle": 0.6, "kurta": 0.6, "saree": 0.6 },
+  "Hyderabad": { "shoes": 0.7, "shirt": 0.7, "jeans": 0.7, "phone": 0.85, "appliance": 0.7, "bag": 0.6, "sunglasses": 0.7, "headphones": 0.7, "food": 0.8, "kettle": 0.6, "kurta": 0.6, "saree": 0.7 },
+  "Kolkata":   { "shoes": 0.7, "shirt": 0.7, "jeans": 0.7, "phone": 0.8, "appliance": 0.7, "bag": 0.7, "sunglasses": 0.7, "headphones": 0.7, "food": 0.8, "kettle": 0.6, "kurta": 0.7, "saree": 0.8 },
+  "Jaipur":    { "shoes": 0.7, "shirt": 0.7, "jeans": 0.6, "phone": 0.7, "appliance": 0.6, "bag": 0.6, "sunglasses": 0.8, "headphones": 0.6, "food": 0.8, "kettle": 0.5, "kurta": 0.8, "saree": 0.8 }
+}

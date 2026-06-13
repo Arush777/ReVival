@@ -1,0 +1,15 @@
+{
+  "shoes":     { "manufacturing_kg_co2": 14.0, "weight_kg": 0.8 },
+  "shirt":     { "manufacturing_kg_co2": 7.0,  "weight_kg": 0.3 },
+  "jeans":     { "manufacturing_kg_co2": 20.0, "weight_kg": 0.7 },
+  "kurta":     { "manufacturing_kg_co2": 6.0,  "weight_kg": 0.4 },
+  "saree":     { "manufacturing_kg_co2": 8.0,  "weight_kg": 0.6 },
+  "phone":     { "manufacturing_kg_co2": 70.0, "weight_kg": 0.2 },
+  "laptop":    { "manufacturing_kg_co2": 300.0,"weight_kg": 2.0 },
+  "appliance": { "manufacturing_kg_co2": 150.0,"weight_kg": 5.0 },
+  "bag":       { "manufacturing_kg_co2": 10.0, "weight_kg": 0.5 },
+  "sunglasses":{ "manufacturing_kg_co2": 5.0,  "weight_kg": 0.1 },
+  "food":      { "manufacturing_kg_co2": 2.0,  "weight_kg": 0.5 },
+  "headphones":{ "manufacturing_kg_co2": 25.0, "weight_kg": 0.3 },
+  "kettle":    { "manufacturing_kg_co2": 20.0, "weight_kg": 1.2 }
+}
