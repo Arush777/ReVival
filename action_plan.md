@@ -3,6 +3,94 @@
 
 ---
 
+## Table of Contents
+
+- [Folder Structure](#folder-structure)
+- [Tech Stack](#tech-stack)
+- [MVP Deployment Boundary](#mvp-deployment-boundary)
+  - Local frontend/backend split
+  - AWS services used in MVP
+  - AWS services explicitly not used in MVP
+- [Phase 0 — Environment Setup](#phase-0--environment-setup)
+  - `requirements.txt`
+  - AWS account setup checklist
+  - IAM policy for local development
+  - Backend `.env`
+  - Frontend `.env.local`
+  - Local run commands
+  - S3 buckets to create
+- [Phase 1 — DynamoDB Tables](#phase-1--dynamodb-tables)
+  - Physical table names and billing mode
+  - `Items`
+  - `Buyers`
+  - `BuyerInterestIndex`
+  - `GradeCache`
+  - `ListingFlags`
+  - `CreditsLedger`
+  - `create_tables.py` exact contract
+  - How the tables connect
+  - S3 object layout
+- [Phase 2 — Reference JSON Files](#phase-2--reference-json-files)
+  - `size_standard_map.json`
+  - `carbon_table.json`
+  - `demand_table.json`
+  - `city_coords.json`
+- [Phase 3 — Seed Data](#phase-3--seed-data)
+  - `buyers.json`
+  - Buyer seed robustness rules
+  - `items.json`
+  - Item validation rules
+- [Phase 4 — Agent Implementation](#phase-4--agent-implementation)
+  - `db/dynamo.py`
+  - `db/s3.py`
+  - `cache.py`
+  - Agent ① — grading
+  - Agent ④ — disposition
+  - Agent ⑤ — pricing
+  - Agent ② — matching
+  - Agent ⑥ — green credits
+  - Agent ③ — passport
+  - Agent ⑦ — prevention
+  - Community Listing (P2P)
+- [Phase 5 — Orchestrator](#phase-5--orchestrator)
+  - `process_return`
+  - `process_existing_item`
+- [Phase 6 — API Endpoints](#phase-6--api-endpoints-mainpy)
+  - Endpoint summary
+  - Shared response rules
+  - `GET /health`
+  - `GET /config`
+  - `POST /returns`
+  - `POST /community-list`
+  - `GET /items/{item_id}`
+  - `GET /items/{item_id}/passport`
+  - `GET /listings/{listing_id}/warning`
+  - `GET /buyers`
+  - `GET /buyers/{buyer_id}`
+  - `GET /buyers/{buyer_id}/recommendations`
+  - `GET /ops/items`
+  - `POST /notify-seller`
+  - `POST /credits/redeem`
+  - Frontend page-to-endpoint map
+- [Phase 7 — Frontend Screens](#phase-7--frontend-screens)
+  - Screen 1 — Buyer Recommendation Feed
+  - Screen 2 — Original Product Page Prevention Widget
+  - Screen 3 — Refurb Listing Page
+  - Screen 4 — Returns Flow
+  - Screen 5 — Exchange / Trade-in Confirmation
+  - Screen 6 — P2P Seller Listing
+  - Screen 7 — Ops Dashboard
+  - Screen 8 — Order Confirmation Green Impact
+- [Phase 8 — Seed Script](#phase-8--seed-script)
+  - `seed/seed.py`
+  - Demo cache warmup
+  - Seed validation checks
+- [Phase 9 — Demo Script](#phase-9--demo-script-record-this-exactly)
+  - 90-second demo narrative
+- [Phase 10 — Build Order](#phase-10--build-order)
+
+---
+
 ## Folder Structure
 
 ```
