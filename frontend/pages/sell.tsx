@@ -172,7 +172,14 @@ export default function SellPage() {
         }
         const res = await fetch(`${API_BASE}/grade-preview`, { method: "POST", body: fd });
         const data = await res.json();
-        if (!cancelled) setAiGrade(data.grade ?? null);
+        if (!cancelled) {
+          if (!res.ok) {
+            setError(data.detail ?? "AI grading failed. Please try uploading photos instead.");
+            setAiGrade(null);
+          } else {
+            setAiGrade(data.grade ?? null);
+          }
+        }
       } catch {
         if (!cancelled) setAiGrade(null);
       } finally {

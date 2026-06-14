@@ -134,10 +134,11 @@ async def post_returns(
 async def post_grade_preview(
     category: str = Form(...),
     condition: str = Form("returned_open_box"),
-    photos: Optional[List[UploadFile]] = File(default=None),
+    photos: Optional[Union[UploadFile, List[UploadFile]]] = File(default=None),
     video: Optional[UploadFile] = File(None),
 ):
-    if not photos and not video:
+    photos_list = _normalize_photos(photos)
+    if not photos_list and not video:
         raise HTTPException(status_code=422, detail="Provide at least one photo or a video.")
 
     item = {
@@ -152,12 +153,21 @@ async def post_grade_preview(
         "history_note": f"Seller condition: {condition}",
     }
 
-    photo_paths = await _save_uploads(photos or [])
+    photo_paths = await _save_uploads(photos_list)
     video_path = await _save_video(video) if video else None
     try:
         if video_path:
             try:
                 grading = grade_from_video(item, video_path)
+            except FileNotFoundError:
+                # ffmpeg not installed — fall back to photos if available, else friendly error
+                if photo_paths:
+                    grading = grade_item_from_paths(item, photo_paths)
+                else:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Video grading requires ffmpeg. Please upload photos instead.",
+                    )
             except Exception:
                 if not photo_paths:
                     raise
