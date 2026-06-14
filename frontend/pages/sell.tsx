@@ -745,18 +745,33 @@ export default function SellPage() {
             }}
           >
             {isManualReview ? (
-              <div
-                style={{
-                  border: "1px solid #ffc107",
-                  backgroundColor: "#fff8e1",
-                  borderRadius: "6px",
-                  padding: "16px",
-                  color: "#856404",
-                  marginBottom: "16px",
-                }}
-              >
-                <strong>Item needs review</strong> — our team will contact you within 24 hours to discuss the next steps.
-              </div>
+              <>
+                <div
+                  style={{
+                    border: "1px solid #ffc107",
+                    backgroundColor: "#fff8e1",
+                    borderRadius: "6px",
+                    padding: "16px",
+                    color: "#856404",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <strong>Item needs review</strong> — our team will contact you within 24 hours to discuss the next steps.
+                </div>
+                {/* Price summary — shown even when manual review is triggered */}
+                <div style={{ marginBottom: "16px" }}>
+                  {askingPrice && (
+                    <div style={{ fontSize: "15px", fontWeight: "bold" }}>
+                      Your asking price: ₹{parseInt(askingPrice).toLocaleString("en-IN")}
+                    </div>
+                  )}
+                  {priceRec && aiGrade && (
+                    <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
+                      AI recommended: ₹{priceRec.recommended_price.toLocaleString("en-IN")} (Grade {aiGrade} × demand {priceRec.demand_factor})
+                    </div>
+                  )}
+                </div>
+              </>
             ) : (
               <>
                 {/* Approval header */}
