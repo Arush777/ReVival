@@ -87,9 +87,15 @@ async def post_returns(
     payload: str = Form(...),
     photos: List[UploadFile] = File(...),
     trade_in: Optional[str] = Form(None),
+    replacement_option: Optional[str] = Form(None),
 ):
     item_payload = json.loads(payload)
     is_trade_in = trade_in is not None and trade_in.lower() == "true"
+
+    # Inject replacement_option into payload so orchestrator can route it.
+    # Accepted values: "direct_replacement" | "replace_with_resale" | None (standard return).
+    if replacement_option:
+        item_payload["replacement_option"] = replacement_option
 
     photo_paths = await _save_uploads(photos)
     try:

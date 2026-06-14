@@ -10,7 +10,7 @@ from agents.green_credits import compute_credits
 from agents.matching import match_buyers
 from agents.passport import generate_passport
 from agents.prevention import correct_listing, predict_listing_flag, write_listing_flag
-from agents.pricing import CITY_COORDS, haversine
+from agents.pricing import CITY_COORDS, haversine, recommend_circular_price
 from db.dynamo import batch_get, from_ddb, get_item, put_item, table, update_item
 from db.s3 import presign_passport, upload_photo
 
@@ -209,6 +209,9 @@ def _run_agents(item: dict, s3_keys: list[str], trade_in: bool) -> None:
 
 
 def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False) -> dict:
+    # Extract replacement option before creating the item record
+    replacement_option = payload.pop("replacement_option", None)
+
     # 1. Create item record (status=pending)
     item = create_item_record(payload)
 
@@ -220,6 +223,47 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
     update_item_field(item, "photo_keys", s3_keys)
 
     _run_agents(item, s3_keys, trade_in)
+
+    # Post-pipeline: handle replacement routing choices
+    if replacement_option == "direct_replacement":
+        # Route the returned item through grading/disposition as normal;
+        # flag that a brand-new replacement has been queued for the buyer.
+        update_item_field(item, "replacement_queued", True)
+
+    elif replacement_option == "replace_with_resale":
+        # Customer gets a new product AND lists the faulty item for P2P resale.
+        # Force-list regardless of grade so the item enters the circular economy.
+        grade = item.get("grade", "C")
+        original_price = item.get("original_price_inr", 0)
+        region = item.get("return_hub_city", "Bangalore")
+        category = item.get("category", "")
+
+        price_data = recommend_circular_price(original_price, grade, category, region)
+
+        defects = item.get("defects") or []
+        defect_notes = (
+            "; ".join(
+                f"{d.get('type', 'defect')} ({d.get('severity', 'minor')})"
+                for d in defects
+            )
+            if defects
+            else "Minor defects noted by AI grading"
+        )
+
+        updates = {
+            "disposition": "resell",
+            "listing_type": "defective_deal",
+            "listing_notes": f"Defective - Certified Deal: {defect_notes}",
+            "base_price_inr": price_data["recommended_price"],
+            "status": "listed",
+            "replacement_queued": True,
+        }
+        update_item_fields(item, updates)
+        logger.info(
+            "[replace-with-resale] item=%s grade=%s defective_price=%d notes=%r",
+            item["item_id"], grade, price_data["recommended_price"], defect_notes,
+        )
+
     return assemble_result(item)
 
 
