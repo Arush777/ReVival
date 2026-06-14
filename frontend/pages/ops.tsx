@@ -8,14 +8,25 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 interface OpsItem {
   item_id: string;
   name: string;
+  brand: string;
+  category: string;
   status: string;
   grade: string;
   disposition: string;
   base_price_inr: number;
+  original_price_inr: number;
   top_match_buyer_id: string;
   top_match_risk: number;
+  top_match_why: string;
   size_mismatch: boolean;
   color_mismatch: boolean;
+  defects: { type: string; severity: string; evidence?: string }[];
+  grading_notes: string;
+  listing_type: string;
+  listing_notes: string;
+  replacement_queued: boolean;
+  co2_saved_kg: number;
+  credits: number;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -29,7 +40,7 @@ const GRADE_COLORS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   listed: "#2e7d32",
   pending: "#e65100",
-  manual_review: "#856404",
+  manual_review: "#b71c1c",
   recycle: "#b71c1c",
   donate: "#0277BD",
   refurbish: "#6a1b9a",
@@ -53,6 +64,8 @@ const DISPOSITION_LABELS: Record<string, string> = {
   manual_review: "Manual Review",
 };
 
+const GRADE_FACTORS: Record<string, number> = { A: 0.70, B: 0.55, C: 0.40, D: 0.20 };
+
 function riskColor(risk: number): { color: string; bg: string; label: string } {
   if (risk < 0.1) return { color: "#2d6a4f", bg: "#d8f3dc", label: "low risk" };
   if (risk <= 0.25) return { color: "#856404", bg: "#fff8e1", label: "medium risk" };
@@ -63,7 +76,7 @@ const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "pending", label: "Pending" },
   { value: "listed", label: "Listed" },
-  { value: "manual_review", label: "Manual Review" },
+  { value: "manual_review", label: "Human Review" },
   { value: "recycle", label: "Recycle" },
   { value: "donate", label: "Donate" },
   { value: "refurbish", label: "Refurbish" },
@@ -74,6 +87,7 @@ export default function OpsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [notifyStatus, setNotifyStatus] = useState<Record<string, string>>({});
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
   const fetchItems = useCallback(() => {
     setLoading(true);
@@ -117,6 +131,26 @@ export default function OpsPage() {
     }
   }
 
+  function toggleExpand(itemId: string) {
+    setExpandedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  const isHumanReview = (item: OpsItem) => item.status === "manual_review";
+
+  // Sort: human review items first
+  const sortedItems = [...items].sort((a, b) => {
+    if (isHumanReview(a) && !isHumanReview(b)) return -1;
+    if (!isHumanReview(a) && isHumanReview(b)) return 1;
+    return 0;
+  });
+
+  const humanReviewCount = items.filter(isHumanReview).length;
+
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#EAEDED" }}>
       <AmazonHeader />
@@ -136,6 +170,43 @@ export default function OpsPage() {
         <h1 style={{ fontSize: "22px", fontWeight: "bold", margin: "0 0 16px 0" }}>
           Item Intelligence Dashboard
         </h1>
+
+        {/* Human review alert banner */}
+        {humanReviewCount > 0 && (
+          <div
+            style={{
+              backgroundColor: "#fce4ec",
+              border: "2px solid #e53935",
+              borderRadius: "8px",
+              padding: "12px 16px",
+              marginBottom: "16px",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              color: "#b71c1c",
+              fontWeight: "bold",
+              fontSize: "14px",
+            }}
+          >
+            🚨 {humanReviewCount} item{humanReviewCount !== 1 ? "s" : ""} require human review
+            <button
+              onClick={() => setStatusFilter("manual_review")}
+              style={{
+                marginLeft: "auto",
+                backgroundColor: "#e53935",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                padding: "4px 12px",
+                fontSize: "12px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              View All
+            </button>
+          </div>
+        )}
 
         {/* Filters */}
         <div
@@ -215,9 +286,12 @@ export default function OpsPage() {
           </div>
         )}
 
-        {!loading && items.map((item) => {
+        {!loading && sortedItems.map((item) => {
           const risk = item.top_match_risk ?? 0;
           const rc = riskColor(risk);
+          const isReview = isHumanReview(item);
+          const isExpanded = expandedItems.has(item.item_id);
+          const hasDefects = item.defects && item.defects.length > 0;
 
           return (
             <div
@@ -226,11 +300,31 @@ export default function OpsPage() {
                 backgroundColor: "white",
                 borderRadius: "8px",
                 padding: "16px 20px",
-                border: "1px solid #ddd",
+                border: isReview ? "2px solid #e53935" : "1px solid #ddd",
                 marginBottom: "12px",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                boxShadow: isReview ? "0 2px 8px rgba(229,57,53,0.15)" : "0 1px 3px rgba(0,0,0,0.05)",
               }}
             >
+              {/* HUMAN REVIEW REQUESTED banner */}
+              {isReview && (
+                <div
+                  style={{
+                    backgroundColor: "#b71c1c",
+                    color: "white",
+                    borderRadius: "4px",
+                    padding: "6px 12px",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    marginBottom: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  🚨 HUMAN REVIEW REQUESTED — Awaiting manual verification
+                </div>
+              )}
+
               {/* Header row */}
               <div
                 style={{
@@ -272,6 +366,36 @@ export default function OpsPage() {
                     Grade {item.grade}
                   </span>
                 )}
+
+                {item.listing_type === "defective_deal" && (
+                  <span
+                    style={{
+                      backgroundColor: "#e65100",
+                      color: "white",
+                      borderRadius: "4px",
+                      padding: "2px 8px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Defective Deal
+                  </span>
+                )}
+
+                {item.replacement_queued && (
+                  <span
+                    style={{
+                      backgroundColor: "#0277BD",
+                      color: "white",
+                      borderRadius: "4px",
+                      padding: "2px 8px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Replacement Queued
+                  </span>
+                )}
               </div>
 
               {/* Details row */}
@@ -293,7 +417,17 @@ export default function OpsPage() {
                   <strong style={{ color: "#B12704" }}>
                     ₹{item.base_price_inr?.toLocaleString("en-IN") ?? "—"}
                   </strong>
+                  {item.original_price_inr > 0 && item.grade && GRADE_FACTORS[item.grade] && (
+                    <span style={{ color: "#888", fontSize: "11px", marginLeft: "4px" }}>
+                      ({Math.round(GRADE_FACTORS[item.grade] * 100)}% of ₹{item.original_price_inr.toLocaleString("en-IN")} MRP)
+                    </span>
+                  )}
                 </span>
+                {item.co2_saved_kg > 0 && (
+                  <span style={{ color: "#2d6a4f" }}>
+                    🌿 {item.co2_saved_kg} kg CO₂ saved
+                  </span>
+                )}
               </div>
 
               {/* Mismatch flags */}
@@ -319,6 +453,23 @@ export default function OpsPage() {
                 </div>
               )}
 
+              {/* Listing notes (defective deal) */}
+              {item.listing_notes && (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#e65100",
+                    backgroundColor: "#fff3e0",
+                    border: "1px solid #ffcc80",
+                    borderRadius: "4px",
+                    padding: "6px 10px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  📋 {item.listing_notes}
+                </div>
+              )}
+
               {/* Top match + risk */}
               {item.top_match_buyer_id && (
                 <div
@@ -327,7 +478,7 @@ export default function OpsPage() {
                     gap: "16px",
                     flexWrap: "wrap",
                     fontSize: "13px",
-                    marginBottom: "12px",
+                    marginBottom: "10px",
                     alignItems: "center",
                   }}
                 >
@@ -346,6 +497,90 @@ export default function OpsPage() {
                   >
                     risk {(risk * 100).toFixed(1)}% — {rc.label}
                   </span>
+                </div>
+              )}
+
+              {/* AI match explanation */}
+              {item.top_match_why && (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#333",
+                    backgroundColor: "#f1f8e9",
+                    border: "1px solid #c8e6c9",
+                    borderRadius: "4px",
+                    padding: "6px 10px",
+                    marginBottom: "10px",
+                    fontStyle: "italic",
+                  }}
+                >
+                  🤖 Match rationale: "{item.top_match_why}"
+                </div>
+              )}
+
+              {/* Expandable AI grading breakdown */}
+              {(hasDefects || item.grading_notes) && (
+                <div style={{ marginBottom: "10px" }}>
+                  <button
+                    onClick={() => toggleExpand(item.item_id)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#146EB4",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      padding: "0",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    {isExpanded ? "▼" : "▶"} AI Grading Breakdown
+                  </button>
+
+                  {isExpanded && (
+                    <div
+                      style={{
+                        marginTop: "8px",
+                        padding: "10px 12px",
+                        backgroundColor: "#f9f9f9",
+                        border: "1px solid #eee",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {hasDefects && (
+                        <div style={{ marginBottom: "8px" }}>
+                          <strong>Defects detected:</strong>
+                          <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                            {item.defects.map((d, i) => (
+                              <li key={i} style={{ marginBottom: "2px", color: "#555" }}>
+                                {d.type} — <em>{d.severity}</em>
+                                {d.evidence && <span style={{ color: "#888" }}> · Evidence: {d.evidence}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {!hasDefects && (
+                        <div style={{ color: "#2d6a4f", marginBottom: "8px" }}>
+                          ✓ No defects detected
+                        </div>
+                      )}
+                      {item.grading_notes && (
+                        <div>
+                          <strong>Notes:</strong>{" "}
+                          <span style={{ color: "#555" }}>{item.grading_notes}</span>
+                        </div>
+                      )}
+                      {item.grade && (
+                        <div style={{ marginTop: "6px", color: "#888" }}>
+                          Grade {item.grade} → {Math.round((GRADE_FACTORS[item.grade] ?? 0.4) * 100)}% recovery factor
+                          {item.original_price_inr > 0 && ` → ₹${Math.round(item.original_price_inr * (GRADE_FACTORS[item.grade] ?? 0.4)).toLocaleString("en-IN")} recovered`}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

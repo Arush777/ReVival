@@ -455,14 +455,25 @@ async def get_ops_items(status: Optional[str] = None, limit: int = 50):
         ops_items.append({
             "item_id": item.get("item_id", ""),
             "name": item.get("name", ""),
+            "brand": item.get("brand", ""),
+            "category": item.get("category", ""),
             "status": item.get("status", ""),
             "grade": item.get("grade", ""),
             "disposition": item.get("disposition", ""),
             "base_price_inr": item.get("base_price_inr", 0),
+            "original_price_inr": item.get("original_price_inr", 0),
             "top_match_buyer_id": top.get("buyer_id"),
             "top_match_risk": top.get("re_return_risk"),
+            "top_match_why": top.get("why_this_fits", ""),
             "size_mismatch": item.get("size_mismatch", False),
             "color_mismatch": item.get("color_mismatch", False),
+            "defects": item.get("defects", []),
+            "grading_notes": item.get("history_note", ""),
+            "listing_type": item.get("listing_type", ""),
+            "listing_notes": item.get("listing_notes", ""),
+            "replacement_queued": item.get("replacement_queued", False),
+            "co2_saved_kg": item.get("co2_saved_kg", 0),
+            "credits": item.get("credits", 0),
         })
     return {"items": ops_items}
 
