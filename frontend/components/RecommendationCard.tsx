@@ -2,6 +2,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { addToCart, isInCart } from "../lib/cart";
 
+export interface XaiDefect {
+  type: string;
+  severity: string;
+  evidence?: string;
+}
+
 export interface RecommendationCardProps {
   item_id: string;
   brand: string;
@@ -18,6 +24,13 @@ export interface RecommendationCardProps {
   credits: number;
   re_return_risk: number;
   why_this_fits: string;
+  distance_km?: number;
+  // XAI transparency fields (all optional — card works without them)
+  xai_reason_neutralized?: string;
+  xai_reason_recurrence?: string;
+  xai_grade_factor?: number;
+  xai_defects?: XaiDefect[];
+  xai_grading_notes?: string;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -52,9 +65,128 @@ function ShieldIcon() {
   );
 }
 
+const SIGNAL_LABELS: Record<string, { label: string; color: string }> = {
+  strong: { label: "Strong match", color: "#2d6a4f" },
+  partial: { label: "Partial match", color: "#856404" },
+  none: { label: "No match", color: "#888" },
+};
+
+const SEVERITY_COLORS: Record<string, string> = {
+  minor: "#856404",
+  moderate: "#e65100",
+  major: "#b71c1c",
+};
+
+function XaiPanel(props: RecommendationCardProps) {
+  const hasDefects = (props.xai_defects?.length ?? 0) > 0;
+  const neutralized = props.xai_reason_neutralized ?? "none";
+  const recurrence = props.xai_reason_recurrence ?? "none";
+  const gradeFactor = props.xai_grade_factor;
+  const riskPct = Math.round((props.re_return_risk ?? 0) * 100);
+
+  return (
+    <div
+      style={{
+        marginTop: "10px",
+        padding: "12px 14px",
+        backgroundColor: "#f8f9fa",
+        border: "1px solid #e0e0e0",
+        borderRadius: "6px",
+        fontSize: "12px",
+        color: "#333",
+      }}
+    >
+      <div style={{ fontWeight: "bold", fontSize: "12px", color: "#0F1111", marginBottom: "8px" }}>
+        AI Analysis Breakdown
+      </div>
+
+      {/* Match signals */}
+      <div style={{ marginBottom: "8px" }}>
+        <div style={{ fontWeight: "600", color: "#555", marginBottom: "4px" }}>Match Signals</div>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <span style={{ color: SIGNAL_LABELS[neutralized]?.color ?? "#888" }}>
+            ↩ Return reason neutralized: <strong>{SIGNAL_LABELS[neutralized]?.label ?? neutralized}</strong>
+          </span>
+          <span style={{ color: SIGNAL_LABELS[recurrence]?.color ?? "#888" }}>
+            ↻ Recurrence risk: <strong>{SIGNAL_LABELS[recurrence]?.label ?? recurrence}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* Re-return risk score */}
+      <div style={{ marginBottom: "8px" }}>
+        <div style={{ fontWeight: "600", color: "#555", marginBottom: "2px" }}>Re-return Risk</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div
+            style={{
+              width: "80px",
+              height: "6px",
+              backgroundColor: "#e0e0e0",
+              borderRadius: "3px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${riskPct}%`,
+                height: "100%",
+                backgroundColor: riskPct < 15 ? "#2d6a4f" : riskPct < 30 ? "#e65100" : "#b71c1c",
+                borderRadius: "3px",
+              }}
+            />
+          </div>
+          <span style={{ color: riskPct < 15 ? "#2d6a4f" : riskPct < 30 ? "#e65100" : "#b71c1c" }}>
+            {riskPct}% risk
+          </span>
+        </div>
+      </div>
+
+      {/* Grade factor */}
+      {gradeFactor !== undefined && (
+        <div style={{ marginBottom: "8px" }}>
+          <div style={{ fontWeight: "600", color: "#555", marginBottom: "2px" }}>Pricing Factor</div>
+          <div>
+            Grade {props.grade} → <strong>{Math.round(gradeFactor * 100)}%</strong> of original price retained
+          </div>
+        </div>
+      )}
+
+      {/* Defects */}
+      {hasDefects && (
+        <div style={{ marginBottom: "8px" }}>
+          <div style={{ fontWeight: "600", color: "#555", marginBottom: "4px" }}>Grading Defects</div>
+          <ul style={{ margin: 0, paddingLeft: "16px" }}>
+            {props.xai_defects!.map((d, i) => (
+              <li key={i} style={{ marginBottom: "2px", color: SEVERITY_COLORS[d.severity] ?? "#333" }}>
+                {d.type} <span style={{ fontStyle: "italic", color: "#888" }}>({d.severity})</span>
+                {d.evidence && <span style={{ color: "#666" }}> — {d.evidence}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Grading notes */}
+      {props.xai_grading_notes && (
+        <div>
+          <div style={{ fontWeight: "600", color: "#555", marginBottom: "2px" }}>AI Notes</div>
+          <div style={{ color: "#555", fontStyle: "italic" }}>{props.xai_grading_notes}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RecommendationCard(props: RecommendationCardProps) {
   const [imgError, setImgError] = useState(false);
   const [added, setAdded] = useState(false);
+  const [showXai, setShowXai] = useState(false);
+
+  const hasXai =
+    (props.xai_defects?.length ?? 0) > 0 ||
+    !!props.xai_grading_notes ||
+    (props.xai_reason_neutralized && props.xai_reason_neutralized !== "none") ||
+    props.xai_grade_factor !== undefined;
 
   const savingsPct = props.original_price_inr
     ? Math.round(((props.original_price_inr - props.price_inr) / props.original_price_inr) * 100)
@@ -224,13 +356,35 @@ export default function RecommendationCard(props: RecommendationCardProps) {
             gap: "5px",
             fontSize: "13px",
             color: "#333",
-            marginBottom: "12px",
+            marginBottom: "4px",
           }}
         >
           <ShieldIcon />
           <span>
             <em>&ldquo;{props.why_this_fits}&rdquo;</em>
           </span>
+        </div>
+
+        {/* XAI toggle */}
+        <div style={{ marginBottom: "12px" }}>
+          <button
+            onClick={() => setShowXai((v) => !v)}
+            style={{
+              background: "none",
+              border: "none",
+              padding: "0",
+              cursor: "pointer",
+              fontSize: "12px",
+              color: "#007185",
+              textDecoration: "underline",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "3px",
+            }}
+          >
+            {showXai ? "▲ hide AI details" : "▼ ...more AI details"}
+          </button>
+          {showXai && <XaiPanel {...props} />}
         </div>
 
         {/* CTAs */}
