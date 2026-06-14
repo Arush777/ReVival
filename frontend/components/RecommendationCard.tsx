@@ -63,7 +63,7 @@ export default function RecommendationCard(props: RecommendationCardProps) {
   function handleAdd() {
     addToCart({
       item_id: props.item_id,
-      name: `${props.brand} ${props.name}`.trim(),
+      name: props.name,
       brand: props.brand,
       grade: props.grade,
       price_inr: props.price_inr,
@@ -158,7 +158,7 @@ export default function RecommendationCard(props: RecommendationCardProps) {
             textDecoration: "none",
           }}
         >
-          {props.brand} {props.name}
+          {props.name}
         </Link>
 
         {/* Rating */}

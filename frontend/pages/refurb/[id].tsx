@@ -103,7 +103,7 @@ export default function RefurbPage() {
     if (!item) return;
     addToCart({
       item_id: item.item_id,
-      name: `${item.brand} ${item.name}`.trim(),
+      name: item.name,
       brand: item.brand,
       grade: item.grade,
       price_inr: displayPrice ?? item.base_price_inr,
@@ -298,7 +298,7 @@ export default function RefurbPage() {
 
             {/* Title */}
             <h1 style={{ fontSize: "22px", fontWeight: "bold", margin: "0 0 4px 0", color: "#0F1111" }}>
-              {item.brand} {item.name}
+              {item.name}
             </h1>
             <div style={{ fontSize: "13px", color: "#007185", marginBottom: "12px" }}>
               ★★★★☆ AI-graded condition

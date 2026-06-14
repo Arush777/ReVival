@@ -185,6 +185,78 @@ async def get_buyers(
     }
 
 
+_ORDER_HISTORY: dict = {
+    "BUY-001": [
+        {
+            "order_id": "402-7823451-1234567",
+            "order_date": "2024-11-12",
+            "item_id": "ORD-001",
+            "listing_id": "LST-NIKE-AIR-270-BLK-10",
+            "name": "Nike Air Max 270",
+            "brand": "Nike",
+            "category": "shoes",
+            "listed_size": "US 10",
+            "listed_color": "black",
+            "original_price_inr": 9999,
+        },
+        {
+            "order_id": "402-6541230-9876543",
+            "order_date": "2024-10-03",
+            "item_id": "ORD-002",
+            "listing_id": "LST-HM-SHIRT-OLIVE-M",
+            "name": "H&M Cotton T-Shirt",
+            "brand": "H&M",
+            "category": "shirt",
+            "listed_size": "M",
+            "listed_color": "olive",
+            "original_price_inr": 1499,
+        },
+        {
+            "order_id": "402-1122334-5566778",
+            "order_date": "2024-09-18",
+            "item_id": "ORD-003",
+            "listing_id": "LST-WILDCRAFT-BAG-BLK",
+            "name": "WildCraft Laptop Bag",
+            "brand": "WildCraft",
+            "category": "bag",
+            "listed_size": "one-size",
+            "listed_color": "black",
+            "original_price_inr": 1899,
+        },
+        {
+            "order_id": "402-8899001-2233445",
+            "order_date": "2024-08-07",
+            "item_id": "ORD-004",
+            "listing_id": "LST-LEVI-512-BLUE-32",
+            "name": "Levi's 512 Slim Taper Jeans",
+            "brand": "Levi's",
+            "category": "jeans",
+            "listed_size": "32x30",
+            "listed_color": "blue",
+            "original_price_inr": 3999,
+        },
+        {
+            "order_id": "402-5544332-1122009",
+            "order_date": "2024-07-21",
+            "item_id": "ORD-005",
+            "listing_id": "LST-BOAT-BT500-BLK",
+            "name": "boAt Rockerz 500 Bluetooth Headphones",
+            "brand": "boAt",
+            "category": "headphones",
+            "listed_size": "one-size",
+            "listed_color": "black",
+            "original_price_inr": 2499,
+        },
+    ]
+}
+
+
+@app.get("/buyers/{buyer_id}/orders")
+async def get_buyer_orders(buyer_id: str):
+    orders = _ORDER_HISTORY.get(buyer_id, [])
+    return {"buyer_id": buyer_id, "orders": orders}
+
+
 @app.get("/buyers/{buyer_id}")
 async def get_buyer(buyer_id: str):
     buyer = get_item("Buyers", {"buyer_id": buyer_id})
@@ -240,6 +312,8 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10):
             )
 
     items = _get_recommendations(buyer_id, limit)
+    # Remove items the buyer themselves listed for sale
+    items = [i for i in items if i.get("seller_id") != buyer_id]
     enriched = []
     for item in items:
         photo_keys = item.get("photo_keys", [])
@@ -365,6 +439,80 @@ async def get_ops_items(status: Optional[str] = None, limit: int = 50):
             "color_mismatch": item.get("color_mismatch", False),
         })
     return {"items": ops_items}
+
+
+@app.get("/search/suggestions")
+async def get_search_suggestions(q: str = "", limit: int = 8):
+    if not q or len(q) < 2:
+        return {"suggestions": []}
+
+    q_lower = q.lower()
+    resp = table("Items").scan()
+    rows = from_ddb(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table("Items").scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+        rows.extend(from_ddb(resp.get("Items", [])))
+
+    seen: set = set()
+    suggestions = []
+    for item in rows:
+        name = item.get("name", "")
+        brand = item.get("brand", "")
+        category = item.get("category", "")
+        if any(q_lower in field.lower() for field in [name, brand, category]):
+            label = name
+            if label not in seen:
+                seen.add(label)
+                suggestions.append({
+                    "label": label,
+                    "item_id": item.get("item_id"),
+                    "category": category,
+                    "brand": brand,
+                })
+        if len(suggestions) >= limit:
+            break
+
+    return {"suggestions": suggestions}
+
+
+@app.get("/search")
+async def search_items(q: str = "", limit: int = 20):
+    if not q:
+        return {"items": [], "query": q}
+
+    q_lower = q.lower()
+    resp = table("Items").scan()
+    rows = from_ddb(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table("Items").scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+        rows.extend(from_ddb(resp.get("Items", [])))
+
+    results = []
+    for item in rows:
+        name = item.get("name", "")
+        brand = item.get("brand", "")
+        category = item.get("category", "")
+        if any(q_lower in field.lower() for field in [name, brand, category]):
+            photo_keys = item.get("photo_keys", [])
+            photo_url = presign_photo(photo_keys[0]) if photo_keys else ""
+            results.append({
+                "item_id": item.get("item_id"),
+                "name": item.get("name", ""),
+                "brand": item.get("brand", ""),
+                "category": item.get("category", ""),
+                "grade": item.get("grade", ""),
+                "status": item.get("status", ""),
+                "base_price_inr": item.get("base_price_inr", 0),
+                "original_price_inr": item.get("original_price_inr", 0),
+                "photo_url": photo_url,
+                "return_hub_city": item.get("return_hub_city", ""),
+                "co2_saved_kg": item.get("co2_saved_kg", 0),
+                "credits": item.get("credits", 0),
+            })
+        if len(results) >= limit:
+            break
+
+    return {"items": results, "query": q}
 
 
 @app.post("/notify-seller")

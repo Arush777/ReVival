@@ -1,12 +1,68 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/router";
 import AmazonHeader from "../components/AmazonHeader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
 
-const CATEGORIES = [
-  "shoes", "shirt", "jeans", "kurta", "saree", "phone",
-  "laptop", "appliance", "bag", "sunglasses", "food", "headphones", "kettle",
+interface OrderItem {
+  order_id: string;
+  order_date: string;
+  item_id: string;
+  listing_id: string;
+  name: string;
+  brand: string;
+  category: string;
+  listed_size: string;
+  listed_color: string;
+  original_price_inr: number;
+}
+
+const CATEGORY_GROUPS = [
+  {
+    label: "Apparel",
+    options: [
+      { value: "shirt", label: "Shirts & Tops" },
+      { value: "kurta", label: "Kurtas & Ethnic Wear" },
+      { value: "saree", label: "Sarees & Dupattas" },
+      { value: "jeans", label: "Jeans & Trousers" },
+    ],
+  },
+  {
+    label: "Footwear",
+    options: [
+      { value: "shoes", label: "Shoes & Sandals" },
+    ],
+  },
+  {
+    label: "Electronics",
+    options: [
+      { value: "phone", label: "Mobile Phones" },
+      { value: "laptop", label: "Laptops & Tablets" },
+      { value: "headphones", label: "Headphones & Earphones" },
+      { value: "appliance", label: "Home Appliances" },
+      { value: "kettle", label: "Kitchen Appliances" },
+    ],
+  },
+  {
+    label: "Accessories",
+    options: [
+      { value: "bag", label: "Bags & Backpacks" },
+      { value: "sunglasses", label: "Sunglasses & Eyewear" },
+    ],
+  },
+  {
+    label: "Food & Grocery",
+    options: [
+      { value: "food", label: "Food & Grocery" },
+    ],
+  },
+  {
+    label: "Other",
+    options: [
+      { value: "other", label: "Something else" },
+    ],
+  },
 ];
 
 const RETURN_REASONS = [
@@ -61,6 +117,7 @@ export default function ReturnPage() {
 
   const [itemName, setItemName] = useState("");
   const [category, setCategory] = useState("");
+  const [otherCategory, setOtherCategory] = useState("");
   const [brand, setBrand] = useState("");
   const [returnReason, setReturnReason] = useState("");
   const [originalPrice, setOriginalPrice] = useState("");
@@ -71,9 +128,31 @@ export default function ReturnPage() {
   const [photos, setPhotos] = useState<File[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReturnResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/buyers/${BUYER_ID}/orders`)
+      .then((r) => r.json())
+      .then((data) => setOrders(data.orders ?? []))
+      .catch(() => setOrders([]))
+      .finally(() => setOrdersLoading(false));
+  }, []);
+
+  function handleOrderSelect(order: OrderItem) {
+    setSelectedOrder(order);
+    setItemName(order.name);
+    setCategory(order.category);
+    setBrand(order.brand);
+    setSize(order.listed_size);
+    setColor(order.listed_color);
+    setOriginalPrice(String(order.original_price_inr));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -92,10 +171,12 @@ export default function ReturnPage() {
 
     try {
       const itemId = `ITM-UPLOAD-${Date.now()}`;
+      const backendCategory = category === "other" ? "appliance" : category;
+
       const payload = {
         item_id: itemId,
         listing_id: `LST-UPLOAD-${Date.now()}`,
-        category,
+        category: backendCategory,
         brand: brand || "Unknown",
         name: itemName || `${brand} ${category}`.trim() || "Item",
         listed_size: size || "one-size",
@@ -172,6 +253,64 @@ export default function ReturnPage() {
           Submit a Return
         </h1>
 
+        {/* Order history picker */}
+        {!result && (
+          <div
+            style={{
+              backgroundColor: "white",
+              borderRadius: "8px",
+              padding: "20px 24px",
+              border: "1px solid #ddd",
+              marginBottom: "16px",
+            }}
+          >
+            <h2 style={{ fontSize: "15px", fontWeight: "bold", margin: "0 0 12px 0" }}>
+              Select item to return
+            </h2>
+            {ordersLoading ? (
+              <div style={{ color: "#888", fontSize: "13px" }}>Loading your orders...</div>
+            ) : orders.length === 0 ? (
+              <div style={{ color: "#888", fontSize: "13px" }}>No recent orders found. Fill in the details below manually.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {orders.map((order) => (
+                  <button
+                    key={order.order_id}
+                    type="button"
+                    onClick={() => handleOrderSelect(order)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      border: selectedOrder?.order_id === order.order_id
+                        ? "2px solid #FF9900"
+                        : "1px solid #ddd",
+                      borderRadius: "6px",
+                      backgroundColor: selectedOrder?.order_id === order.order_id ? "#fff8ee" : "#fafafa",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      width: "100%",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "14px", fontWeight: "bold", color: "#0F1111" }}>
+                        {order.name}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#888", marginTop: "2px" }}>
+                        Order #{order.order_id} · Ordered on {new Date(order.order_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "14px", fontWeight: "bold", color: "#B12704", flexShrink: 0, marginLeft: "16px" }}>
+                      ₹{order.original_price_inr.toLocaleString("en-IN")}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Step 1 form — hide after result */}
         {!result && (
           <form onSubmit={handleSubmit}>
@@ -184,9 +323,18 @@ export default function ReturnPage() {
                 marginBottom: "16px",
               }}
             >
-              <h2 style={{ fontSize: "16px", fontWeight: "bold", margin: "0 0 16px 0" }}>
-                Step 1: Item details &amp; photos
+              <h2 style={{ fontSize: "16px", fontWeight: "bold", margin: "0 0 4px 0" }}>
+                Item details &amp; photos
               </h2>
+              {selectedOrder ? (
+                <div style={{ fontSize: "12px", color: "#2d6a4f", marginBottom: "14px" }}>
+                  Pre-filled from order #{selectedOrder.order_id}. You can edit any field below.
+                </div>
+              ) : (
+                <div style={{ fontSize: "12px", color: "#888", marginBottom: "14px" }}>
+                  Select an order above to auto-fill, or enter details manually.
+                </div>
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
                 <div>
@@ -204,10 +352,23 @@ export default function ReturnPage() {
                   <label style={labelStyle}>Category *</label>
                   <select value={category} onChange={(e) => setCategory(e.target.value)} required style={selectStyle}>
                     <option value="">Select category</option>
-                    {CATEGORIES.map((c) => (
-                      <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                    {CATEGORY_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
+                  {category === "other" && (
+                    <input
+                      type="text"
+                      value={otherCategory}
+                      onChange={(e) => setOtherCategory(e.target.value)}
+                      placeholder="Describe the product type"
+                      style={{ ...inputStyle, marginTop: "6px" }}
+                    />
+                  )}
                 </div>
 
                 <div>

@@ -6,9 +6,51 @@ import AmazonHeader from "../components/AmazonHeader";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
 
-const CATEGORIES = [
-  "shoes", "shirt", "jeans", "kurta", "saree", "phone",
-  "laptop", "appliance", "bag", "sunglasses", "food", "headphones", "kettle",
+const CATEGORY_GROUPS = [
+  {
+    label: "Apparel",
+    options: [
+      { value: "shirt", label: "Shirts & Tops" },
+      { value: "kurta", label: "Kurtas & Ethnic Wear" },
+      { value: "saree", label: "Sarees & Dupattas" },
+      { value: "jeans", label: "Jeans & Trousers" },
+    ],
+  },
+  {
+    label: "Footwear",
+    options: [
+      { value: "shoes", label: "Shoes & Sandals" },
+    ],
+  },
+  {
+    label: "Electronics",
+    options: [
+      { value: "phone", label: "Mobile Phones" },
+      { value: "laptop", label: "Laptops & Tablets" },
+      { value: "headphones", label: "Headphones & Earphones" },
+      { value: "appliance", label: "Home Appliances" },
+      { value: "kettle", label: "Kitchen Appliances" },
+    ],
+  },
+  {
+    label: "Accessories",
+    options: [
+      { value: "bag", label: "Bags & Backpacks" },
+      { value: "sunglasses", label: "Sunglasses & Eyewear" },
+    ],
+  },
+  {
+    label: "Food & Grocery",
+    options: [
+      { value: "food", label: "Food & Grocery" },
+    ],
+  },
+  {
+    label: "Other",
+    options: [
+      { value: "other", label: "Something else" },
+    ],
+  },
 ];
 
 const CONDITION_OPTIONS = [
@@ -64,6 +106,7 @@ export default function SellPage() {
 
   const [itemName, setItemName] = useState("");
   const [category, setCategory] = useState("");
+  const [otherCategory, setOtherCategory] = useState("");
   const [brand, setBrand] = useState("");
   const [conditionNote, setConditionNote] = useState("returned_open_box");
   const [askingPrice, setAskingPrice] = useState("");
@@ -96,10 +139,12 @@ export default function SellPage() {
       const itemId = `ITM-P2P-${Date.now()}`;
       const listingPrice = parseInt(askingPrice);
 
+      const backendCategory = category === "other" ? "appliance" : category;
+
       const payload = {
         item_id: itemId,
         listing_id: `LST-P2P-${Date.now()}`,
-        category,
+        category: backendCategory,
         brand: brand || "Unknown",
         name: itemName || `${brand} ${category}`.trim() || "Item",
         listed_size: size || "one-size",
@@ -195,10 +240,23 @@ export default function SellPage() {
                   <label style={labelStyle}>Category *</label>
                   <select value={category} onChange={(e) => setCategory(e.target.value)} required style={selectStyle}>
                     <option value="">Select category</option>
-                    {CATEGORIES.map((c) => (
-                      <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                    {CATEGORY_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
+                  {category === "other" && (
+                    <input
+                      type="text"
+                      value={otherCategory}
+                      onChange={(e) => setOtherCategory(e.target.value)}
+                      placeholder="Describe the product type"
+                      style={{ ...inputStyle, marginTop: "6px" }}
+                    />
+                  )}
                 </div>
 
                 <div>

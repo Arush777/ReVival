@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import { cartCount, CART_EVENT } from "../lib/cart";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -8,6 +9,13 @@ const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
 interface BuyerInfo {
   name: string;
   credit_score: number;
+}
+
+interface Suggestion {
+  label: string;
+  item_id: string;
+  category: string;
+  brand: string;
 }
 
 function SearchIcon() {
@@ -26,9 +34,22 @@ function CartIcon() {
   );
 }
 
-export default function AmazonHeader() {
+interface AmazonHeaderProps {
+  initialMode?: "Second Life" | "All";
+}
+
+export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
+  const router = useRouter();
   const [buyer, setBuyer] = useState<BuyerInfo | null>(null);
   const [count, setCount] = useState(0);
+  const [searchMode, setSearchMode] = useState<"Second Life" | "All">(
+    initialMode ?? "Second Life"
+  );
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/buyers/${BUYER_ID}`)
@@ -38,9 +59,7 @@ export default function AmazonHeader() {
           setBuyer({ name: data.name, credit_score: data.credit_score ?? 0 });
         }
       })
-      .catch(() => {
-        // Never crash the page if the API is down
-      });
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -53,6 +72,57 @@ export default function AmazonHeader() {
       window.removeEventListener("storage", sync);
     };
   }, []);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const fetchSuggestions = useCallback((q: string) => {
+    if (q.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    fetch(`${API_BASE}/search/suggestions?q=${encodeURIComponent(q)}&limit=8`)
+      .then((r) => r.json())
+      .then((data) => setSuggestions(data.suggestions ?? []))
+      .catch(() => setSuggestions([]));
+  }, []);
+
+  function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setQuery(val);
+    setShowSuggestions(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val), 220);
+  }
+
+  function handleSearch(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    setShowSuggestions(false);
+    if (!query.trim()) return;
+    router.push(`/search?q=${encodeURIComponent(query.trim())}&mode=${searchMode === "All" ? "all" : "second_life"}`);
+  }
+
+  function handleSuggestionClick(s: Suggestion) {
+    setQuery(s.label);
+    setShowSuggestions(false);
+    router.push(`/refurb/${s.item_id}`);
+  }
+
+  function handleModeChange(mode: "Second Life" | "All") {
+    setSearchMode(mode);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  }
+
+  const showSecondLifeNav = searchMode === "Second Life";
 
   return (
     <header style={{ backgroundColor: "#232F3E", color: "white", width: "100%" }}>
@@ -93,17 +163,20 @@ export default function AmazonHeader() {
         </div>
 
         {/* Search bar */}
-        <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
-          <div
+        <div ref={searchRef} style={{ flex: 1, display: "flex", minWidth: 0, position: "relative" }}>
+          <form
+            onSubmit={handleSearch}
             style={{
               display: "flex",
               width: "100%",
               backgroundColor: "#fff",
               borderRadius: "4px",
-              overflow: "hidden",
+              overflow: "visible",
             }}
           >
             <select
+              value={searchMode}
+              onChange={(e) => handleModeChange(e.target.value as "Second Life" | "All")}
               style={{
                 backgroundColor: "#f3f3f3",
                 border: "none",
@@ -114,15 +187,18 @@ export default function AmazonHeader() {
                 cursor: "pointer",
                 outline: "none",
                 flexShrink: 0,
+                borderRadius: "4px 0 0 4px",
               }}
             >
-              <option>Second Life</option>
-              <option>All</option>
+              <option value="Second Life">Second Life</option>
+              <option value="All">All</option>
             </select>
             <input
               type="text"
-              placeholder="Search second-life products..."
-              readOnly
+              value={query}
+              onChange={handleQueryChange}
+              onFocus={() => query.length >= 2 && setShowSuggestions(true)}
+              placeholder={searchMode === "All" ? "Search Amazon.in..." : "Search second-life products..."}
               style={{
                 flex: 1,
                 border: "none",
@@ -134,6 +210,7 @@ export default function AmazonHeader() {
               }}
             />
             <button
+              type="submit"
               style={{
                 backgroundColor: "#FF9900",
                 border: "none",
@@ -142,11 +219,62 @@ export default function AmazonHeader() {
                 flexShrink: 0,
                 display: "flex",
                 alignItems: "center",
+                borderRadius: "0 4px 4px 0",
               }}
             >
               <SearchIcon />
             </button>
-          </div>
+          </form>
+
+          {/* Autocomplete dropdown */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                right: 0,
+                backgroundColor: "white",
+                border: "1px solid #ccc",
+                borderRadius: "0 0 4px 4px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                zIndex: 1000,
+                overflow: "hidden",
+              }}
+            >
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onMouseDown={() => handleSuggestionClick(s)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    width: "100%",
+                    padding: "9px 14px",
+                    border: "none",
+                    borderBottom: i < suggestions.length - 1 ? "1px solid #f0f0f0" : "none",
+                    backgroundColor: "white",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f7f7f7")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "white")}
+                >
+                  <span style={{ color: "#555", flexShrink: 0 }}>
+                    <SearchIcon />
+                  </span>
+                  <div>
+                    <div style={{ fontSize: "13px", color: "#0F1111" }}>{s.label}</div>
+                    <div style={{ fontSize: "11px", color: "#888" }}>
+                      {s.brand} · {s.category}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Account */}
@@ -225,27 +353,29 @@ export default function AmazonHeader() {
         </Link>
       </div>
 
-      {/* Secondary nav strip */}
-      <nav style={{ backgroundColor: "#37475A", borderTop: "1px solid #3a4553" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "18px",
-            padding: "6px 16px",
-            maxWidth: "1400px",
-            margin: "0 auto",
-            fontSize: "13px",
-            flexWrap: "wrap",
-          }}
-        >
-          <NavLink href="/" label="Second Life" />
-          <NavLink href="/product/LST-NIKE-AIR-270-BLK-10" label="Original PDP" />
-          <NavLink href="/sell" label="Sell Your Item" />
-          <NavLink href="/return" label="Returns" />
-          <NavLink href="/ops" label="Ops Dashboard" />
-        </div>
-      </nav>
+      {/* Secondary nav strip — hidden when "All" mode is active */}
+      {showSecondLifeNav && (
+        <nav style={{ backgroundColor: "#37475A", borderTop: "1px solid #3a4553" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "18px",
+              padding: "6px 16px",
+              maxWidth: "1400px",
+              margin: "0 auto",
+              fontSize: "13px",
+              flexWrap: "wrap",
+            }}
+          >
+            <NavLink href="/" label="Second Life" />
+            <NavLink href="/product/LST-NIKE-AIR-270-BLK-10" label="Original PDP" />
+            <NavLink href="/sell" label="Sell Your Item" />
+            <NavLink href="/return" label="Returns" />
+            <NavLink href="/ops" label="Ops Dashboard" />
+          </div>
+        </nav>
+      )}
     </header>
   );
 }
