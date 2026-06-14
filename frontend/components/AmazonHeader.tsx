@@ -2,6 +2,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { cartCount, CART_EVENT } from "../lib/cart";
+import catalogData from "../data/catalog.json";
+import { CatalogProduct } from "./CatalogCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
@@ -16,7 +18,13 @@ interface Suggestion {
   item_id: string;
   category: string;
   brand: string;
+  href?: string;
 }
+
+const ALL_CATALOG: CatalogProduct[] = [
+  ...(catalogData.heroes as CatalogProduct[]),
+  ...(catalogData.filler as CatalogProduct[]),
+];
 
 function SearchIcon() {
   return (
@@ -84,15 +92,34 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const fetchSuggestions = useCallback((q: string) => {
+  const fetchSuggestions = useCallback((q: string, mode: "Second Life" | "All") => {
     if (q.length < 2) {
       setSuggestions([]);
       return;
     }
-    fetch(`${API_BASE}/search/suggestions?q=${encodeURIComponent(q)}&limit=8`)
-      .then((r) => r.json())
-      .then((data) => setSuggestions(data.suggestions ?? []))
-      .catch(() => setSuggestions([]));
+    if (mode === "All") {
+      const ql = q.toLowerCase();
+      const hits = ALL_CATALOG.filter(
+        (p) =>
+          p.title.toLowerCase().includes(ql) ||
+          p.brand.toLowerCase().includes(ql) ||
+          p.category.toLowerCase().includes(ql)
+      ).slice(0, 8);
+      setSuggestions(
+        hits.map((p) => ({
+          label: p.title,
+          item_id: p.catalog_id,
+          category: p.category,
+          brand: p.brand,
+          href: `/product/${p.catalog_id}`,
+        }))
+      );
+    } else {
+      fetch(`${API_BASE}/search/suggestions?q=${encodeURIComponent(q)}&limit=8`)
+        .then((r) => r.json())
+        .then((data) => setSuggestions(data.suggestions ?? []))
+        .catch(() => setSuggestions([]));
+    }
   }, []);
 
   function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -100,7 +127,7 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
     setQuery(val);
     setShowSuggestions(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSuggestions(val), 220);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val, searchMode), 220);
   }
 
   function handleSearch(e?: React.FormEvent) {
@@ -113,13 +140,18 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
   function handleSuggestionClick(s: Suggestion) {
     setQuery(s.label);
     setShowSuggestions(false);
-    router.push(`/refurb/${s.item_id}`);
+    router.push(s.href ?? `/refurb/${s.item_id}`);
   }
 
   function handleModeChange(mode: "Second Life" | "All") {
     setSearchMode(mode);
-    setSuggestions([]);
-    setShowSuggestions(false);
+    if (query.length >= 2) {
+      fetchSuggestions(query, mode);
+      setShowSuggestions(true);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
   }
 
   const showSecondLifeNav = searchMode === "Second Life";

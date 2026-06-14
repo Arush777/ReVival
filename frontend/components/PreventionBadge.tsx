@@ -45,7 +45,7 @@ export default function PreventionBadge({
       >
         <WarningIcon />
         <span style={{ fontWeight: "bold", fontSize: "14px", color: "#856404" }}>
-          [!] {alertLabel}
+          {alertLabel}
         </span>
       </div>
       <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#333" }}>

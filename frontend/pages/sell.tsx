@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import AmazonHeader from "../components/AmazonHeader";
@@ -114,7 +114,14 @@ export default function SellPage() {
   const [color, setColor] = useState("");
   const [hubCity, setHubCity] = useState("Mumbai");
   const [photos, setPhotos] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const urls = photos.map((f) => URL.createObjectURL(f));
+    setPreviewUrls(urls);
+    return () => { urls.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [photos]);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SellResult | null>(null);
@@ -324,7 +331,7 @@ export default function SellPage() {
                 </div>
               </div>
 
-              {/* Photo upload */}
+              {/* Photo upload + previews */}
               <div style={{ marginTop: "16px" }}>
                 <label style={labelStyle}>Photos (min 1, max 5) *</label>
                 <div
@@ -352,14 +359,42 @@ export default function SellPage() {
                   />
                   {photos.length === 0 ? (
                     <span style={{ color: "#888", fontSize: "14px" }}>
-                      Drag &amp; drop or click to browse (up to 5 photos)
+                      Click to browse (up to 5 photos — used for AI grading)
                     </span>
                   ) : (
-                    <span style={{ color: "#2d6a4f", fontSize: "14px" }}>
-                      {photos.length} photo{photos.length > 1 ? "s" : ""} selected
+                    <span style={{ color: "#2d6a4f", fontSize: "14px", fontWeight: "bold" }}>
+                      {photos.length} photo{photos.length > 1 ? "s" : ""} selected — click to change
                     </span>
                   )}
                 </div>
+                {/* Photo previews */}
+                {previewUrls.length > 0 && (
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
+                    {previewUrls.map((url, i) => (
+                      <div key={i} style={{ position: "relative" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={`Photo ${i + 1}`}
+                          style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 4, border: "1px solid #ddd", display: "block" }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPhotos((prev) => prev.filter((_, j) => j !== i))}
+                          style={{
+                            position: "absolute", top: -6, right: -6,
+                            width: 18, height: 18, borderRadius: "50%",
+                            backgroundColor: "#B12704", color: "white", border: "none",
+                            fontSize: 12, cursor: "pointer", display: "flex",
+                            alignItems: "center", justifyContent: "center", padding: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

@@ -147,7 +147,7 @@ export default function OrderConfirmPage() {
             Browse more Second Life items
           </Link>
           <Link
-            href="/ops"
+            href="/return"
             style={{
               backgroundColor: "white",
               color: "#146EB4",
@@ -159,7 +159,22 @@ export default function OrderConfirmPage() {
               display: "inline-block",
             }}
           >
-            View Order Details
+            Returns &amp; Sell
+          </Link>
+          <Link
+            href="/ops"
+            style={{
+              backgroundColor: "white",
+              color: "#555",
+              border: "1px solid #ddd",
+              borderRadius: "4px",
+              padding: "10px 24px",
+              fontSize: "14px",
+              textDecoration: "none",
+              display: "inline-block",
+            }}
+          >
+            Ops Dashboard
           </Link>
         </div>
       </div>

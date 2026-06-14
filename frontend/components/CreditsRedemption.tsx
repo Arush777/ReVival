@@ -85,7 +85,7 @@ export default function CreditsRedemption({
               cursor: loading ? "not-allowed" : "pointer",
             }}
           >
-            {loading ? "Applying..." : `Apply ${credits_to_use} Credits — ON`}
+            {loading ? "Applying..." : `Apply ${credits_to_use} Credits`}
           </button>
           {error && (
             <div style={{ fontSize: "12px", color: "#b71c1c", marginTop: "6px" }}>{error}</div>

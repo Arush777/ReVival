@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/router";
 import AmazonHeader from "../components/AmazonHeader";
+import Spinner from "../components/Spinner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
@@ -126,6 +127,7 @@ export default function ReturnPage() {
   const [hubCity, setHubCity] = useState("Bangalore");
   const [tradeIn, setTradeIn] = useState(false);
   const [photos, setPhotos] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -135,6 +137,12 @@ export default function ReturnPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReturnResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const urls = photos.map((f) => URL.createObjectURL(f));
+    setPreviewUrls(urls);
+    return () => { urls.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [photos]);
 
   useEffect(() => {
     fetch(`${API_BASE}/buyers/${BUYER_ID}/orders`)
@@ -268,7 +276,9 @@ export default function ReturnPage() {
               Select item to return
             </h2>
             {ordersLoading ? (
-              <div style={{ color: "#888", fontSize: "13px" }}>Loading your orders...</div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#888", fontSize: "13px" }}>
+                <Spinner size={18} color="#888" /> Loading your orders…
+              </div>
             ) : orders.length === 0 ? (
               <div style={{ color: "#888", fontSize: "13px" }}>No recent orders found. Fill in the details below manually.</div>
             ) : (
@@ -462,16 +472,44 @@ export default function ReturnPage() {
                   />
                   {photos.length === 0 ? (
                     <span style={{ color: "#888", fontSize: "14px" }}>
-                      Drag &amp; drop or click to browse
+                      Click to browse (required for AI grading)
                     </span>
                   ) : (
-                    <span style={{ color: "#2d6a4f", fontSize: "14px" }}>
-                      {photos.length} photo{photos.length > 1 ? "s" : ""} selected:{" "}
-                      {photos.map((p) => p.name).join(", ")}
+                    <span style={{ color: "#2d6a4f", fontSize: "14px", fontWeight: "bold" }}>
+                      {photos.length} photo{photos.length > 1 ? "s" : ""} selected — click to change
                     </span>
                   )}
                 </div>
               </div>
+
+              {/* Photo previews */}
+              {previewUrls.length > 0 && (
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
+                  {previewUrls.map((url, i) => (
+                    <div key={i} style={{ position: "relative" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt={`Photo ${i + 1}`}
+                        style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 4, border: "1px solid #ddd", display: "block" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPhotos((prev) => prev.filter((_, j) => j !== i))}
+                        style={{
+                          position: "absolute", top: -6, right: -6,
+                          width: 18, height: 18, borderRadius: "50%",
+                          backgroundColor: "#B12704", color: "white", border: "none",
+                          fontSize: 12, cursor: "pointer", display: "flex",
+                          alignItems: "center", justifyContent: "center", padding: 0,
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Trade-in toggle */}
               <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "10px" }}>

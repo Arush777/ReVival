@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import AmazonHeader from "../components/AmazonHeader";
+import Spinner from "../components/Spinner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -32,6 +33,24 @@ const STATUS_COLORS: Record<string, string> = {
   recycle: "#b71c1c",
   donate: "#0277BD",
   refurbish: "#6a1b9a",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  listed: "Listed",
+  pending: "Pending",
+  manual_review: "Manual Review",
+  recycle: "Recycle",
+  donate: "Donate",
+  refurbish: "Refurbish",
+};
+
+const DISPOSITION_LABELS: Record<string, string> = {
+  resell: "Certified Resell",
+  refurbish: "Refurbish",
+  donate: "Donate",
+  recycle: "Recycle",
+  exchange: "Trade-in Credit",
+  manual_review: "Manual Review",
 };
 
 function riskColor(risk: number): { color: string; bg: string; label: string } {
@@ -176,8 +195,8 @@ export default function OpsPage() {
         </div>
 
         {loading && (
-          <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
-            Loading items...
+          <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}>
+            <Spinner size={36} />
           </div>
         )}
 
@@ -236,7 +255,7 @@ export default function OpsPage() {
                     fontWeight: "bold",
                   }}
                 >
-                  {item.status}
+                  {STATUS_LABELS[item.status] ?? item.status}
                 </span>
 
                 {item.grade && (
@@ -267,7 +286,7 @@ export default function OpsPage() {
                 }}
               >
                 <span>
-                  Route: <strong>{item.disposition ?? "—"}</strong>
+                  Route: <strong>{DISPOSITION_LABELS[item.disposition] ?? item.disposition ?? "—"}</strong>
                 </span>
                 <span>
                   Price:{" "}
@@ -293,7 +312,7 @@ export default function OpsPage() {
                     marginBottom: "10px",
                   }}
                 >
-                  [!]{" "}
+                  ⚠{" "}
                   {item.size_mismatch && "Size mismatch detected"}
                   {item.size_mismatch && item.color_mismatch && " · "}
                   {item.color_mismatch && "Color mismatch detected"}

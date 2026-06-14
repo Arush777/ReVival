@@ -1,6 +1,7 @@
 import { useRouter } from "next/router";
 import Link from "next/link";
 import AmazonHeader from "../components/AmazonHeader";
+import Spinner from "../components/Spinner";
 
 function LeafIcon() {
   return (
@@ -63,7 +64,9 @@ export default function ExchangePage() {
 
       <div style={{ maxWidth: "800px", margin: "0 auto", padding: "24px 16px" }}>
         {!isReady ? (
-          <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>Loading...</div>
+          <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}>
+            <Spinner size={32} />
+          </div>
         ) : (
           <>
             {/* Success header */}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import AmazonHeader from "../components/AmazonHeader";
+import Spinner from "../components/Spinner";
 import { getCart, removeFromCart, clearCart, CART_EVENT, CartItem } from "../lib/cart";
 
 const GRADE_COLORS: Record<string, string> = {
@@ -25,6 +26,7 @@ export default function CartPage() {
   const router = useRouter();
   const [items, setItems] = useState<CartItem[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -40,6 +42,8 @@ export default function CartPage() {
   const totalCredits = items.reduce((sum, i) => sum + (i.credits ?? 0), 0);
 
   function handleCheckout() {
+    if (processing) return;
+    setProcessing(true);
     const params = new URLSearchParams({
       total: String(total),
       co2: String(totalCo2),
@@ -68,7 +72,9 @@ export default function CartPage() {
         </h1>
 
         {!mounted ? (
-          <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>Loading...</div>
+          <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}>
+            <Spinner size={32} />
+          </div>
         ) : items.length === 0 ? (
           <div
             style={{
@@ -227,19 +233,31 @@ export default function CartPage() {
 
               <button
                 onClick={handleCheckout}
+                disabled={processing}
                 style={{
-                  backgroundColor: "#FF9900",
+                  backgroundColor: processing ? "#aaa" : "#FF9900",
                   color: "#000",
                   border: "none",
                   borderRadius: "4px",
                   padding: "12px",
                   fontSize: "15px",
                   fontWeight: "bold",
-                  cursor: "pointer",
+                  cursor: processing ? "not-allowed" : "pointer",
                   width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
                 }}
               >
-                Proceed to Checkout
+                {processing ? (
+                  <>
+                    <Spinner size={16} color="#333" />
+                    Processing…
+                  </>
+                ) : (
+                  "Proceed to Checkout"
+                )}
               </button>
 
               <Link
