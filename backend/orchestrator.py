@@ -1,5 +1,7 @@
 import logging
 import os
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
@@ -20,6 +22,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def extract_video_thumbnail(video_path: str) -> str | None:
+    """Use ffmpeg to extract a single frame at 1 s from the video. Returns temp JPEG path or None."""
+    try:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+        tmp.close()
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", "1",          # seek to 1 second
+                "-i", video_path,
+                "-frames:v", "1",    # one frame only
+                "-q:v", "2",         # high quality JPEG
+                tmp.name,
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return tmp.name
+    except Exception as exc:
+        logger.warning("ffmpeg thumbnail extraction failed: %s", exc)
+        return None
+
 
 def create_item_record(payload: dict) -> dict:
     item = {**payload, "status": "pending"}
@@ -227,7 +253,23 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
 
     # 2. Upload photos to S3
     s3_keys = upload_photos(item["item_id"], photo_paths)
+
+    # If no photos were provided but a video was, extract a thumbnail frame via ffmpeg
+    if not s3_keys and video_path:
+        thumb_path = extract_video_thumbnail(video_path)
+        if thumb_path:
+            try:
+                key = upload_photo(item["item_id"], thumb_path, "thumbnail.jpg")
+                s3_keys = [key]
+            finally:
+                try:
+                    os.unlink(thumb_path)
+                except OSError:
+                    pass
+
     update_item_field(item, "photo_keys", s3_keys)
+    if video_path:
+        update_item_field(item, "video_graded", True)
 
     _run_agents(item, s3_keys, trade_in, video_path=video_path)
 

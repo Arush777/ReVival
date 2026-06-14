@@ -8,6 +8,11 @@ interface TrustPassportProps {
   passport_url: string;
   item_id?: string;
   grade?: string;
+  evidence?: string[];
+  rubric_version?: string;
+  grader_model?: string;
+  grader_input_hash?: string;
+  confidence_bucket?: string;
 }
 
 function ShieldIcon({ size = 20, color = "#146EB4" }: { size?: number; color?: string }) {
@@ -41,8 +46,14 @@ export default function TrustPassport({
   passport_url,
   item_id,
   grade,
+  evidence,
+  rubric_version,
+  grader_model,
+  grader_input_hash,
+  confidence_bucket,
 }: TrustPassportProps) {
   const [open, setOpen] = useState(false);
+  const [showChain, setShowChain] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -220,6 +231,71 @@ export default function TrustPassport({
                 <LeafIcon />
                 <span>{buyer_reassurance}</span>
               </div>
+
+              {/* AI Reasoning Chain */}
+              {(evidence && evidence.length > 0) && (
+                <div style={{ marginTop: "16px" }}>
+                  <button
+                    onClick={() => setShowChain((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#146EB4",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      padding: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    {showChain ? "▼" : "▶"} How AI verified this
+                  </button>
+                  {showChain && (
+                    <div
+                      style={{
+                        marginTop: "8px",
+                        padding: "12px 14px",
+                        backgroundColor: "#f0f7ff",
+                        border: "1px solid #bbd6f5",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <div style={{ fontWeight: "bold", color: "#1a3a5c", marginBottom: "8px" }}>
+                        AI Visual Observations
+                      </div>
+                      {evidence.map((obs, i) => (
+                        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "5px", color: "#333" }}>
+                          <span style={{ color: "#146EB4", flexShrink: 0 }}>○</span>
+                          <span>{obs}</span>
+                        </div>
+                      ))}
+                      <div
+                        style={{
+                          borderTop: "1px solid #dce8f5",
+                          marginTop: "10px",
+                          paddingTop: "8px",
+                          display: "flex",
+                          gap: "12px",
+                          flexWrap: "wrap",
+                          color: "#888",
+                        }}
+                      >
+                        {grader_model && <span>Model: {grader_model}</span>}
+                        {rubric_version && <span>Rubric: {rubric_version}</span>}
+                        {confidence_bucket && <span>Confidence: {confidence_bucket}</span>}
+                        {grader_input_hash && (
+                          <span title="Fingerprint of the exact photos/frames the AI graded">
+                            Hash: {grader_input_hash.slice(0, 12)}…
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Footer */}
               <div

@@ -125,6 +125,24 @@ def brand_affinity(buyer: dict, item: dict) -> float:
     return 0.0
 
 
+def risk_factors(buyer: dict, item: dict, grading: dict) -> dict:
+    """Return full risk factor breakdown for display — deterministic + LLM-derived rows."""
+    R_base = buyer.get("return_rate", 0.1)
+    R_size = size_incompatibility(buyer, grading)
+    R_cond = condition_intolerance(buyer, grading.get("grade", "B"))
+    B_aff = brand_affinity(buyer, item)
+    eco_boost = min(0.05, buyer.get("credit_score", 0) / 10000)
+    return {
+        "buyer_return_rate":    {"value": round(R_base, 3), "weight": WEIGHTS["R_base"],    "direction": "risk",    "llm_derived": False},
+        "size_incompatibility": {"value": round(R_size, 3), "weight": WEIGHTS["R_size"],    "direction": "risk",    "llm_derived": False},
+        "condition_intolerance":{"value": round(R_cond, 3), "weight": WEIGHTS["R_cond"],    "direction": "risk",    "llm_derived": False},
+        "brand_affinity":       {"value": round(B_aff, 3),  "weight": WEIGHTS["B_affinity"],"direction": "benefit", "llm_derived": False},
+        "reason_recurrence":    {"value": None,              "weight": WEIGHTS["R_reasonrec"],"direction": "risk",   "llm_derived": True},
+        "reason_neutralization":{"value": None,              "weight": WEIGHTS["B_neutralize"],"direction": "benefit","llm_derived": True},
+        "eco_boost":            {"value": round(eco_boost, 4),"weight": 1.0,                "direction": "benefit", "llm_derived": False},
+    }
+
+
 def compute_risk(buyer: dict, item: dict, grading: dict, llm_signal: dict) -> float:
     R_base = buyer.get("return_rate", 0.1)
     R_size = size_incompatibility(buyer, grading)

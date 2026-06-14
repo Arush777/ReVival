@@ -34,7 +34,7 @@ _HTML_TEMPLATE = """\
   <p><strong>Why Returned:</strong> {why_returned}</p>
   <p><strong>For Buyers:</strong> {buyer_reassurance}</p>
   <hr>
-  <p>Item ID: {item_id} | Grade: {grade} | Model: {model_id}</p>
+  <p>Item ID: {item_id} | Grade: {grade} | Verified by: AI Vision Model · AWS Bedrock</p>
 </body>
 </html>"""
 
@@ -149,4 +149,12 @@ def generate_passport(item: dict, grading: dict, credits_data: dict) -> dict:
 
     result = {**passport, "passport_key": passport_key}
     cache_put(cache_key, "passport", result)
+    # Store text fields directly on item so the passport endpoint can read them
+    # without cache-key reconstruction (which fails when co2_saved_kg int/float differs).
+    update_item("Items", {"item_id": item_id}, {
+        "passport_summary": passport["summary"],
+        "passport_condition": passport["condition_statement"],
+        "passport_why_returned": passport["why_returned"],
+        "passport_reassurance": passport["buyer_reassurance"],
+    })
     return result

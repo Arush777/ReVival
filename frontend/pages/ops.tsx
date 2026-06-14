@@ -27,6 +27,11 @@ interface OpsItem {
   replacement_queued: boolean;
   co2_saved_kg: number;
   credits: number;
+  evidence: string[];
+  confidence_bucket: string;
+  wear_level: string;
+  rubric_version: string;
+  grader_input_hash: string;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -292,6 +297,7 @@ export default function OpsPage() {
           const isReview = isHumanReview(item);
           const isExpanded = expandedItems.has(item.item_id);
           const hasDefects = item.defects && item.defects.length > 0;
+          const hasEvidence = item.evidence && item.evidence.length > 0;
 
           return (
             <div
@@ -519,7 +525,7 @@ export default function OpsPage() {
               )}
 
               {/* Expandable AI grading breakdown */}
-              {(hasDefects || item.grading_notes) && (
+              {(hasDefects || hasEvidence || item.grading_notes) && (
                 <div style={{ marginBottom: "10px" }}>
                   <button
                     onClick={() => toggleExpand(item.item_id)}
@@ -536,47 +542,72 @@ export default function OpsPage() {
                     }}
                   >
                     {isExpanded ? "▼" : "▶"} AI Grading Breakdown
+                    {item.confidence_bucket && (
+                      <span style={{ marginLeft: "8px", fontSize: "11px", color: "#888" }}>
+                        · {item.confidence_bucket} confidence
+                      </span>
+                    )}
                   </button>
 
                   {isExpanded && (
                     <div
                       style={{
                         marginTop: "8px",
-                        padding: "10px 12px",
-                        backgroundColor: "#f9f9f9",
-                        border: "1px solid #eee",
-                        borderRadius: "4px",
+                        padding: "12px 14px",
+                        backgroundColor: "#f0f7ff",
+                        border: "1px solid #bbd6f5",
+                        borderRadius: "6px",
                         fontSize: "12px",
                       }}
                     >
+                      {/* AI observations */}
+                      {hasEvidence && (
+                        <div style={{ marginBottom: "10px" }}>
+                          <strong style={{ color: "#1a3a5c" }}>AI Visual Observations:</strong>
+                          <ul style={{ margin: "4px 0 0 16px", padding: 0, color: "#333" }}>
+                            {item.evidence.map((obs, i) => (
+                              <li key={i} style={{ marginBottom: "3px" }}>{obs}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Defects */}
                       {hasDefects && (
                         <div style={{ marginBottom: "8px" }}>
-                          <strong>Defects detected:</strong>
+                          <strong style={{ color: "#1a3a5c" }}>Defects detected:</strong>
                           <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                             {item.defects.map((d, i) => (
                               <li key={i} style={{ marginBottom: "2px", color: "#555" }}>
                                 {d.type} — <em>{d.severity}</em>
-                                {d.evidence && <span style={{ color: "#888" }}> · Evidence: {d.evidence}</span>}
+                                {d.evidence && <span style={{ color: "#888" }}> · {d.evidence}</span>}
                               </li>
                             ))}
                           </ul>
                         </div>
                       )}
-                      {!hasDefects && (
+                      {!hasDefects && !hasEvidence && (
                         <div style={{ color: "#2d6a4f", marginBottom: "8px" }}>
                           ✓ No defects detected
                         </div>
                       )}
                       {item.grading_notes && (
-                        <div>
+                        <div style={{ marginBottom: "6px" }}>
                           <strong>Notes:</strong>{" "}
                           <span style={{ color: "#555" }}>{item.grading_notes}</span>
                         </div>
                       )}
                       {item.grade && (
-                        <div style={{ marginTop: "6px", color: "#888" }}>
+                        <div style={{ marginTop: "6px", color: "#555" }}>
                           Grade {item.grade} → {Math.round((GRADE_FACTORS[item.grade] ?? 0.4) * 100)}% recovery factor
                           {item.original_price_inr > 0 && ` → ₹${Math.round(item.original_price_inr * (GRADE_FACTORS[item.grade] ?? 0.4)).toLocaleString("en-IN")} recovered`}
+                        </div>
+                      )}
+                      {/* Audit trail */}
+                      {(item.rubric_version || item.grader_input_hash) && (
+                        <div style={{ borderTop: "1px solid #dce8f5", marginTop: "8px", paddingTop: "6px", color: "#999", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                          {item.rubric_version && <span>Rubric: {item.rubric_version}</span>}
+                          {item.grader_input_hash && <span>Hash: {item.grader_input_hash.slice(0, 12)}…</span>}
                         </div>
                       )}
                     </div>

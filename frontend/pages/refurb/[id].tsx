@@ -5,6 +5,7 @@ import AmazonHeader from "../../components/AmazonHeader";
 import TrustPassport from "../../components/TrustPassport";
 import GreenImpact from "../../components/GreenImpact";
 import CreditsRedemption from "../../components/CreditsRedemption";
+import AIGradingEvidence from "../../components/AIGradingEvidence";
 import { addToCart } from "../../lib/cart";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -17,6 +18,12 @@ const GRADE_COLORS: Record<string, string> = {
   D: "#b71c1c",
   REVIEW: "#6a1b9a",
 };
+
+interface RiskFactor {
+  value: number;
+  weight: number;
+  direction: "risk" | "benefit";
+}
 
 interface ItemData {
   item_id: string;
@@ -39,7 +46,34 @@ interface ItemData {
   co2_saved_kg: number;
   credits: number;
   seller_id: string;
-  matches: { buyer_id: string; re_return_risk: number }[];
+  matches: {
+    buyer_id: string;
+    buyer_name?: string;
+    re_return_risk: number;
+    why_this_fits?: string;
+    risk_factors?: {
+      buyer_return_rate?: RiskFactor;
+      size_incompatibility?: RiskFactor;
+      condition_intolerance?: RiskFactor;
+      brand_affinity?: RiskFactor;
+    };
+  }[];
+  // Grading evidence
+  evidence: string[];
+  defects: { type: string; severity: string; evidence?: string }[];
+  wear_level: string;
+  functional_status: string;
+  confidence_bucket: string;
+  grade_bucket: string;
+  detected_color: string;
+  detected_size: string;
+  size_mismatch: boolean;
+  color_mismatch: boolean;
+  mismatch_notes: string;
+  rubric_version: string;
+  grader_model: string;
+  grader_input_hash: string;
+  video_graded: boolean;
 }
 
 interface PassportData {
@@ -160,9 +194,10 @@ export default function RefurbPage() {
     );
   }
 
-  const savingsPct = Math.round(
-    ((item.original_price_inr - item.base_price_inr) / item.original_price_inr) * 100
-  );
+  const savingsPct =
+    item.original_price_inr && item.original_price_inr > item.base_price_inr
+      ? Math.round(((item.original_price_inr - item.base_price_inr) / item.original_price_inr) * 100)
+      : null;
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#EAEDED" }}>
@@ -201,29 +236,56 @@ export default function RefurbPage() {
                 borderRadius: "8px",
                 overflow: "hidden",
                 marginBottom: "8px",
+                position: "relative",
               }}
             >
               {item.photo_urls && item.photo_urls[selectedPhoto] && !imgError ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={item.photo_urls[selectedPhoto]}
-                  alt={item.name}
-                  onError={() => setImgError(true)}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.photo_urls[selectedPhoto]}
+                    alt={item.name}
+                    onError={() => setImgError(true)}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                  {item.video_graded && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: "10px",
+                        left: "10px",
+                        fontSize: "11px",
+                        color: "white",
+                        backgroundColor: "rgba(20,110,180,0.85)",
+                        borderRadius: "4px",
+                        padding: "4px 10px",
+                        backdropFilter: "blur(2px)",
+                      }}
+                    >
+                      📹 AI video analysis frame
+                    </div>
+                  )}
+                </>
               ) : (
                 <div
                   style={{
                     width: "100%",
                     height: "100%",
                     display: "flex",
+                    flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#999",
-                    fontSize: "14px",
+                    backgroundColor: "#f5f5f5",
+                    gap: "8px",
+                    padding: "20px",
+                    textAlign: "center",
                   }}
                 >
-                  No photo available
+                  <div style={{ fontSize: "40px" }}>📦</div>
+                  <div style={{ fontSize: "14px", fontWeight: "bold", color: "#333" }}>
+                    {item.brand} {item.category}
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#999" }}>No product photo</div>
                 </div>
               )}
             </div>
@@ -307,22 +369,26 @@ export default function RefurbPage() {
 
             {/* Price */}
             <div style={{ marginBottom: "12px" }}>
-              <span
-                style={{
-                  textDecoration: "line-through",
-                  color: "#888",
-                  fontSize: "14px",
-                  marginRight: "8px",
-                }}
-              >
-                ₹{item.original_price_inr.toLocaleString("en-IN")}
-              </span>
+              {item.original_price_inr ? (
+                <span
+                  style={{
+                    textDecoration: "line-through",
+                    color: "#888",
+                    fontSize: "14px",
+                    marginRight: "8px",
+                  }}
+                >
+                  ₹{item.original_price_inr.toLocaleString("en-IN")}
+                </span>
+              ) : null}
               <span style={{ fontSize: "26px", fontWeight: "bold", color: "#B12704" }}>
-                ₹{(displayPrice ?? item.base_price_inr).toLocaleString("en-IN")}
+                ₹{(displayPrice ?? item.base_price_inr ?? 0).toLocaleString("en-IN")}
               </span>
-              <span style={{ fontSize: "13px", color: "#2d6a4f", marginLeft: "8px" }}>
-                Save {savingsPct}%
-              </span>
+              {savingsPct !== null && (
+                <span style={{ fontSize: "13px", color: "#2d6a4f", marginLeft: "8px" }}>
+                  Save {savingsPct}%
+                </span>
+              )}
             </div>
 
             {/* Green impact */}
@@ -427,8 +493,37 @@ export default function RefurbPage() {
               passport_url={passport.passport_url ?? item.passport_url ?? ""}
               item_id={item.item_id}
               grade={item.grade}
+              evidence={item.evidence}
+              rubric_version={item.rubric_version}
+              grader_model={item.grader_model}
+              grader_input_hash={item.grader_input_hash}
+              confidence_bucket={item.confidence_bucket}
             />
           </div>
+        )}
+
+        {/* AI Inspection Report */}
+        {(item.evidence?.length > 0 || item.defects?.length > 0 || item.grade_bucket) && (
+          <AIGradingEvidence
+            evidence={item.evidence ?? []}
+            defects={item.defects ?? []}
+            wear_level={item.wear_level}
+            confidence_bucket={item.confidence_bucket}
+            grade_bucket={item.grade_bucket}
+            detected_color={item.detected_color}
+            detected_size={item.detected_size}
+            listed_color={item.listed_color}
+            listed_size={item.listed_size}
+            size_mismatch={item.size_mismatch}
+            color_mismatch={item.color_mismatch}
+            mismatch_notes={item.mismatch_notes}
+            rubric_version={item.rubric_version}
+            grader_model={item.grader_model}
+            grader_input_hash={item.grader_input_hash}
+            video_graded={item.video_graded}
+            grade={item.grade}
+            matches={item.matches}
+          />
         )}
       </div>
     </div>

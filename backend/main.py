@@ -4,7 +4,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from dotenv import load_dotenv
 
@@ -40,6 +40,15 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_photos(photos: Optional[Union[UploadFile, List[UploadFile]]]) -> List[UploadFile]:
+    """FastAPI may deserialize a single uploaded file as UploadFile instead of List[UploadFile]."""
+    if photos is None:
+        return []
+    if isinstance(photos, list):
+        return photos
+    return [photos]
+
 
 async def _save_uploads(photos: List[UploadFile]) -> list[str]:
     paths: list[str] = []
@@ -92,7 +101,7 @@ async def config():
 @app.post("/returns")
 async def post_returns(
     payload: str = Form(...),
-    photos: Optional[List[UploadFile]] = File(default=None),
+    photos: Optional[Union[UploadFile, List[UploadFile]]] = File(default=None),
     trade_in: Optional[str] = Form(None),
     replacement_option: Optional[str] = Form(None),
     video: Optional[UploadFile] = File(None),
@@ -100,7 +109,8 @@ async def post_returns(
     item_payload = json.loads(payload)
     is_trade_in = trade_in is not None and trade_in.lower() == "true"
 
-    if not photos and not video:
+    photos_list = _normalize_photos(photos)
+    if not photos_list and not video:
         raise HTTPException(status_code=422, detail="Provide at least one photo or a video.")
 
     # Inject replacement_option into payload so orchestrator can route it.
@@ -108,7 +118,7 @@ async def post_returns(
     if replacement_option:
         item_payload["replacement_option"] = replacement_option
 
-    photo_paths = await _save_uploads(photos or [])
+    photo_paths = await _save_uploads(photos_list)
     video_path = await _save_video(video) if video else None
     try:
         result = process_return(item_payload, photo_paths, is_trade_in, video_path=video_path)
@@ -170,17 +180,18 @@ async def post_grade_preview(
 @app.post("/community-list")
 async def post_community_list(
     payload: str = Form(...),
-    photos: Optional[List[UploadFile]] = File(default=None),
+    photos: Optional[Union[UploadFile, List[UploadFile]]] = File(default=None),
     trade_in: Optional[str] = Form(None),
     video: Optional[UploadFile] = File(None),
 ):
     item_payload = json.loads(payload)
     listing_price_inr = item_payload.get("listing_price_inr")
 
-    if not photos and not video:
+    photos_list = _normalize_photos(photos)
+    if not photos_list and not video:
         raise HTTPException(status_code=422, detail="Provide at least one photo or a video.")
 
-    photo_paths = await _save_uploads(photos or [])
+    photo_paths = await _save_uploads(photos_list)
     video_path = await _save_video(video) if video else None
     try:
         result = process_return(item_payload, photo_paths, False, video_path=video_path)
@@ -246,7 +257,7 @@ async def get_listing_warning(listing_id: str):
 from db.dynamo import query_index, table, from_ddb
 from db.s3 import presign_photo, presign_passport
 from cache import make_cache_key, cache_get
-from agents.matching import get_recommendations as _get_recommendations
+from agents.matching import get_recommendations as _get_recommendations, risk_factors
 from fastapi.responses import JSONResponse
 
 _DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
@@ -454,6 +465,25 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10, cart: str = 
     return {"buyer_id": buyer_id, "items": enriched}
 
 
+def _enrich_matches(item: dict) -> list:
+    """Enrich match entries with buyer name and deterministic risk breakdown."""
+    enriched = []
+    grading = {
+        "grade": item.get("grade", "B"),
+        "detected_category": item.get("category", ""),
+        "detected_size": item.get("detected_size", item.get("listed_size", "unknown")),
+    }
+    for m in item.get("matches", []):
+        buyer = get_item("Buyers", {"buyer_id": m["buyer_id"]}) or {}
+        factors = risk_factors(buyer, item, grading)
+        enriched.append({
+            **m,
+            "buyer_name": buyer.get("name", ""),
+            "risk_factors": factors,
+        })
+    return enriched
+
+
 @app.get("/items/{item_id}")
 async def get_item_detail(item_id: str):
     item = get_item("Items", {"item_id": item_id})
@@ -487,7 +517,23 @@ async def get_item_detail(item_id: str):
         "owner_count": item.get("owner_count", 1),
         "co2_saved_kg": item.get("co2_saved_kg", 0),
         "credits": item.get("credits", 0),
-        "matches": item.get("matches", []),
+        "matches": _enrich_matches(item),
+        # Grading evidence — proves AI inspection is real, not hardcoded
+        "evidence": item.get("evidence", []),
+        "defects": item.get("defects", []),
+        "wear_level": item.get("wear_level", ""),
+        "functional_status": item.get("functional_status", ""),
+        "confidence_bucket": item.get("confidence_bucket", ""),
+        "grade_bucket": item.get("grade_bucket", ""),
+        "detected_color": item.get("detected_color", ""),
+        "detected_size": item.get("detected_size", ""),
+        "size_mismatch": item.get("size_mismatch", False),
+        "color_mismatch": item.get("color_mismatch", False),
+        "mismatch_notes": item.get("mismatch_notes", ""),
+        "rubric_version": item.get("rubric_version", ""),
+        "grader_model": "AI Vision Model · AWS Bedrock",
+        "grader_input_hash": item.get("grader_input_hash", ""),
+        "video_graded": bool(item.get("video_graded", False)),
     }
 
 
@@ -502,23 +548,33 @@ async def get_item_passport(item_id: str):
     passport_key = item.get("passport_key", f"passports/{item_id}.html")
     passport_url = presign_passport(passport_key)
 
-    grade = item.get("grade", "")
-    defects = item.get("defects", [])
-    history_note = item.get("history_note", "")
-    co2_saved_kg = item.get("co2_saved_kg", 0)
-    secondary_str = (
-        grade
-        + str(sorted(str(d) for d in defects))
-        + history_note
-        + str(co2_saved_kg)
-    )
-    cache_key = make_cache_key(
-        "passport", item_id.encode(), secondary_str,
-        "v1", os.environ["BEDROCK_TEXT_MODEL_ID"],
-    )
-    raw = cache_get(cache_key)
-    _PASSPORT_KEYS = {"summary", "condition_statement", "why_returned", "buyer_reassurance"}
-    passport = {k: v for k, v in raw.items() if k in _PASSPORT_KEYS} if raw else raw
+    # Primary path: text fields stored directly on the item record (set by passport.py)
+    if item.get("passport_summary"):
+        passport = {
+            "summary": item["passport_summary"],
+            "condition_statement": item.get("passport_condition", ""),
+            "why_returned": item.get("passport_why_returned", ""),
+            "buyer_reassurance": item.get("passport_reassurance", ""),
+        }
+    else:
+        # Fallback: try cache key reconstruction (may fail for int/float co2 mismatch)
+        grade = item.get("grade", "")
+        defects = item.get("defects", [])
+        history_note = item.get("history_note", "")
+        co2_saved_kg = item.get("co2_saved_kg", 0)
+        secondary_str = (
+            grade
+            + str(sorted(str(d) for d in defects))
+            + history_note
+            + str(float(co2_saved_kg))  # normalise to float to match generation-time str()
+        )
+        cache_key = make_cache_key(
+            "passport", item_id.encode(), secondary_str,
+            "v1", os.environ["BEDROCK_TEXT_MODEL_ID"],
+        )
+        raw = cache_get(cache_key)
+        _PASSPORT_KEYS = {"summary", "condition_statement", "why_returned", "buyer_reassurance"}
+        passport = {k: v for k, v in raw.items() if k in _PASSPORT_KEYS} if raw else raw
     return {"item_id": item_id, "passport_url": passport_url, "passport": passport}
 
 
@@ -563,6 +619,12 @@ async def get_ops_items(status: Optional[str] = None, limit: int = 50):
             "replacement_queued": item.get("replacement_queued", False),
             "co2_saved_kg": item.get("co2_saved_kg", 0),
             "credits": item.get("credits", 0),
+            "evidence": item.get("evidence", []),
+            "confidence_bucket": item.get("confidence_bucket", ""),
+            "wear_level": item.get("wear_level", ""),
+            "rubric_version": item.get("rubric_version", ""),
+            "grader_input_hash": item.get("grader_input_hash", ""),
+            "top_match_risk_raw": None,  # placeholder — recomputed client-side
         })
     return {"items": ops_items}
 
