@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import AmazonHeader from "../components/AmazonHeader";
+import Spinner from "../components/Spinner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
@@ -54,10 +55,10 @@ const CATEGORY_GROUPS = [
 ];
 
 const CONDITION_OPTIONS = [
-  { value: "returned_open_box", label: "Returned / Open box" },
-  { value: "lightly_used", label: "Lightly used" },
-  { value: "good_condition", label: "Good condition" },
-  { value: "well_used", label: "Well used" },
+  { value: "returned_open_box", label: "Returned / Open box", assumedGrade: "A" },
+  { value: "lightly_used", label: "Lightly used", assumedGrade: "B" },
+  { value: "good_condition", label: "Good condition", assumedGrade: "B" },
+  { value: "well_used", label: "Well used", assumedGrade: "C" },
 ];
 
 const CITIES = [
@@ -109,6 +110,7 @@ export default function SellPage() {
   const [otherCategory, setOtherCategory] = useState("");
   const [brand, setBrand] = useState("");
   const [conditionNote, setConditionNote] = useState("returned_open_box");
+  const [mrpPrice, setMrpPrice] = useState("");
   const [askingPrice, setAskingPrice] = useState("");
   const [size, setSize] = useState("");
   const [color, setColor] = useState("");
@@ -117,15 +119,66 @@ export default function SellPage() {
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Price recommendation state
+  const [priceRec, setPriceRec] = useState<{ recommended_price: number; grade_factor: number; demand_factor: number } | null>(null);
+  const [priceRecLoading, setPriceRecLoading] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<SellResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Human review
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewRequested, setReviewRequested] = useState(false);
+
   useEffect(() => {
     const urls = photos.map((f) => URL.createObjectURL(f));
     setPreviewUrls(urls);
     return () => { urls.forEach((u) => URL.revokeObjectURL(u)); };
   }, [photos]);
 
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<SellResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Live price recommendation: debounced on askingPrice / mrpPrice / category / conditionNote / hubCity
+  useEffect(() => {
+    const mrp = parseInt(mrpPrice);
+    const asking = parseInt(askingPrice);
+    if (!mrp || mrp <= 0 || !asking || asking <= 0 || !category) {
+      setPriceRec(null);
+      return;
+    }
+
+    const assumedGrade = CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade ?? "B";
+    const backendCategory = category === "other" ? "appliance" : category;
+
+    const timer = setTimeout(async () => {
+      setPriceRecLoading(true);
+      try {
+        const res = await fetch(
+          `${API_BASE}/listings/recommend-price?original_price=${mrp}&grade=${assumedGrade}&category=${backendCategory}&region=${hubCity}`
+        );
+        const data = await res.json();
+        setPriceRec(data);
+      } catch {
+        setPriceRec(null);
+      } finally {
+        setPriceRecLoading(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [askingPrice, mrpPrice, category, conditionNote, hubCity]);
+
+  async function handleRequestReview() {
+    if (!result?.item_id) return;
+    setReviewLoading(true);
+    try {
+      await fetch(`${API_BASE}/items/${result.item_id}/request-review`, { method: "POST" });
+      setReviewRequested(true);
+    } catch {
+      // silent for demo
+    } finally {
+      setReviewLoading(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -145,6 +198,7 @@ export default function SellPage() {
     try {
       const itemId = `ITM-P2P-${Date.now()}`;
       const listingPrice = parseInt(askingPrice);
+      const originalPrice = parseInt(mrpPrice) || listingPrice;
 
       const backendCategory = category === "other" ? "appliance" : category;
 
@@ -156,8 +210,8 @@ export default function SellPage() {
         name: itemName || `${brand} ${category}`.trim() || "Item",
         listed_size: size || "one-size",
         listed_color: color || "unknown",
-        original_price_inr: listingPrice,
-        return_reason_code: "changed_mind",
+        original_price_inr: originalPrice,
+        return_reason_code: "no_longer_needed",
         return_reason_text: "Seller listing item for resale",
         return_hub_city: hubCity,
         owner_count: 1,
@@ -195,6 +249,35 @@ export default function SellPage() {
 
   const isManualReview =
     result?.grade === "D" || result?.grade === "REVIEW" || result?.disposition === "manual_review" || result?.status === "manual_review" || result?.status === "recycle";
+
+  // Compute price warning
+  const askingPriceNum = parseInt(askingPrice) || 0;
+  let priceWarning: { text: string; color: string; bg: string; borderColor: string } | null = null;
+  if (priceRec && askingPriceNum > 0) {
+    const rec = priceRec.recommended_price;
+    if (askingPriceNum > rec * 1.05) {
+      priceWarning = {
+        text: `Price too high. Less probability of stock clearance. Recommended: ₹${rec.toLocaleString("en-IN")}`,
+        color: "#B12704",
+        bg: "#fce4ec",
+        borderColor: "#B12704",
+      };
+    } else if (askingPriceNum < rec * 0.95) {
+      priceWarning = {
+        text: `Price lower than market rate. You could earn more. Recommended: ₹${rec.toLocaleString("en-IN")}`,
+        color: "#856404",
+        bg: "#fff8e1",
+        borderColor: "#FF9900",
+      };
+    } else {
+      priceWarning = {
+        text: "✓ Optimal price.",
+        color: "#2e7d32",
+        bg: "#d8f3dc",
+        borderColor: "#2e7d32",
+      };
+    }
+  }
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#EAEDED" }}>
@@ -287,14 +370,13 @@ export default function SellPage() {
                 </div>
 
                 <div>
-                  <label style={labelStyle}>Your asking price (₹) *</label>
+                  <label style={labelStyle}>Original MRP (₹) — what you paid</label>
                   <input
                     type="number"
-                    value={askingPrice}
-                    onChange={(e) => setAskingPrice(e.target.value)}
-                    placeholder="e.g. 2200"
+                    value={mrpPrice}
+                    onChange={(e) => setMrpPrice(e.target.value)}
+                    placeholder="e.g. 3999"
                     min="1"
-                    required
                     style={inputStyle}
                   />
                 </div>
@@ -329,6 +411,66 @@ export default function SellPage() {
                     style={inputStyle}
                   />
                 </div>
+              </div>
+
+              {/* Asking price with live AI recommendation */}
+              <div style={{ marginTop: "14px" }}>
+                <label style={labelStyle}>Your asking price (₹) *</label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="number"
+                    value={askingPrice}
+                    onChange={(e) => setAskingPrice(e.target.value)}
+                    placeholder="e.g. 2200"
+                    min="1"
+                    required
+                    style={{
+                      ...inputStyle,
+                      borderColor: priceWarning ? priceWarning.borderColor : "#ccc",
+                      borderWidth: priceWarning ? "2px" : "1px",
+                      paddingRight: priceRecLoading ? "36px" : undefined,
+                    }}
+                  />
+                  {priceRecLoading && (
+                    <span style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)" }}>
+                      <Spinner size={14} color="#888" />
+                    </span>
+                  )}
+                </div>
+
+                {/* Price warning banner */}
+                {priceWarning && (
+                  <div
+                    style={{
+                      marginTop: "6px",
+                      padding: "8px 12px",
+                      borderRadius: "4px",
+                      backgroundColor: priceWarning.bg,
+                      color: priceWarning.color,
+                      fontSize: "13px",
+                      fontWeight: "bold",
+                      border: `1px solid ${priceWarning.borderColor}40`,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    {priceWarning.text}
+                  </div>
+                )}
+
+                {/* XAI breakdown */}
+                {priceRec && !priceRecLoading && (
+                  <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>
+                    AI estimate: Grade {CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade ?? "B"} × demand factor {priceRec.demand_factor} → ₹{priceRec.recommended_price.toLocaleString("en-IN")} recommended
+                  </div>
+                )}
+
+                {!mrpPrice && askingPrice && (
+                  <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>
+                    Enter original MRP above to get AI price recommendation.
+                  </div>
+                )}
               </div>
 
               {/* Photo upload + previews */}
@@ -426,9 +568,12 @@ export default function SellPage() {
                 fontSize: "16px",
                 fontWeight: "bold",
                 cursor: loading ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
-              {loading ? "Grading your item..." : "List My Item →"}
+              {loading ? <><Spinner size={16} color="#000" /> Grading your item...</> : "List My Item →"}
             </button>
           </form>
         )}
@@ -451,10 +596,10 @@ export default function SellPage() {
                   borderRadius: "6px",
                   padding: "16px",
                   color: "#856404",
+                  marginBottom: "16px",
                 }}
               >
-                <strong>Item needs review</strong> — our team will contact you within 24 hours to
-                discuss the next steps.
+                <strong>Item needs review</strong> — our team will contact you within 24 hours to discuss the next steps.
               </div>
             ) : (
               <>
@@ -489,6 +634,11 @@ export default function SellPage() {
                   <div style={{ fontSize: "15px", fontWeight: "bold" }}>
                     Your listing price: ₹{parseInt(askingPrice).toLocaleString("en-IN")}
                   </div>
+                  {priceRec && (
+                    <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
+                      AI recommended: ₹{priceRec.recommended_price.toLocaleString("en-IN")} (Grade {CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade} × demand {priceRec.demand_factor})
+                    </div>
+                  )}
                 </div>
 
                 {/* Trust Passport */}
@@ -526,42 +676,88 @@ export default function SellPage() {
                   <LeafIcon />
                   Saves {result.co2_saved_kg} kg CO₂ · +{result.credits} credits when sold
                 </div>
-
-                <div style={{ display: "flex", gap: "12px" }}>
-                  <Link
-                    href={`/refurb/${result.item_id}`}
-                    style={{
-                      backgroundColor: "#FF9900",
-                      color: "#000",
-                      borderRadius: "4px",
-                      padding: "10px 20px",
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                      textDecoration: "none",
-                      display: "inline-block",
-                    }}
-                  >
-                    View Your Listing →
-                  </Link>
-                  <button
-                    onClick={() => {
-                      setResult(null);
-                      setAskingPrice("");
-                    }}
-                    style={{
-                      backgroundColor: "white",
-                      color: "#146EB4",
-                      border: "1px solid #146EB4",
-                      borderRadius: "4px",
-                      padding: "10px 20px",
-                      fontSize: "14px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Edit Price
-                  </button>
-                </div>
               </>
+            )}
+
+            {/* Action buttons (shown for all outcomes) */}
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+              {!isManualReview && (
+                <Link
+                  href={`/refurb/${result.item_id}`}
+                  style={{
+                    backgroundColor: "#FF9900",
+                    color: "#000",
+                    borderRadius: "4px",
+                    padding: "10px 20px",
+                    fontSize: "14px",
+                    fontWeight: "bold",
+                    textDecoration: "none",
+                    display: "inline-block",
+                  }}
+                >
+                  View Your Listing →
+                </Link>
+              )}
+
+              <button
+                onClick={() => {
+                  setResult(null);
+                  setAskingPrice("");
+                  setReviewRequested(false);
+                }}
+                style={{
+                  backgroundColor: "white",
+                  color: "#146EB4",
+                  border: "1px solid #146EB4",
+                  borderRadius: "4px",
+                  padding: "10px 20px",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                }}
+              >
+                Edit Price
+              </button>
+
+              {/* Human Review button */}
+              {!reviewRequested ? (
+                <button
+                  onClick={handleRequestReview}
+                  disabled={reviewLoading}
+                  style={{
+                    backgroundColor: "white",
+                    color: "#555",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    padding: "10px 18px",
+                    fontSize: "13px",
+                    cursor: reviewLoading ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  {reviewLoading ? <Spinner size={14} color="#555" /> : "🧑‍💼"} Request Human Review
+                </button>
+              ) : (
+                <span
+                  style={{
+                    backgroundColor: "#e8f4fd",
+                    border: "1px solid #90caf9",
+                    borderRadius: "4px",
+                    padding: "10px 18px",
+                    fontSize: "13px",
+                    color: "#0d47a1",
+                  }}
+                >
+                  ✓ Human review requested
+                </span>
+              )}
+            </div>
+
+            {!reviewRequested && (
+              <div style={{ fontSize: "11px", color: "#888", marginTop: "10px" }}>
+                Not happy with the AI Grade? A circular commerce expert will manually verify your item.
+              </div>
             )}
           </div>
         )}
@@ -585,6 +781,7 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "4px",
   fontSize: "13px",
   outline: "none",
+  boxSizing: "border-box",
 };
 
 const selectStyle: React.CSSProperties = {
