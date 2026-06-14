@@ -98,10 +98,10 @@ def append_credits_ledger(seller_id: str, credits_data: dict, item_id: str) -> N
     ts = datetime.now(timezone.utc).isoformat()
     put_item("CreditsLedger", {
         "buyer_id": seller_id,
-        "event_id": f"{ts}#{item_id}#trade_in_credit",
+        "event_id": f"{ts}#{item_id}#earn",
         "timestamp": ts,
         "item_id": item_id,
-        "action": "trade_in_credit",
+        "action": "earn",
         "credits": credits_data["credits"],
         "co2_saved_kg": credits_data["co2_saved_kg"],
     })

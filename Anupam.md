@@ -120,7 +120,7 @@ Work through tasks in order. Each task has a git branch. Merge to `main` when th
 
 ---
 
-### Task 1 — Reference JSON Files
+### ✅ Task 1 — Reference JSON Files
 **Branch:** `feat/seed-reference`  
 **Reference:** `action_plan.md → Phase 2 — Reference JSON Files`  
 **Est:** H0–H1  
@@ -138,7 +138,7 @@ Files to create:
 
 ---
 
-### Task 2 — Seed Data: Buyers + Items
+### ✅ Task 2 — Seed Data: Buyers + Items
 **Branch:** `feat/seed-data`  
 **Reference:** `action_plan.md → Phase 3 — Seed Data`  
 **Est:** H1–H3  
@@ -173,7 +173,7 @@ Validation rules:
 
 ---
 
-### Task 3 — Agent ⑤ Pricing + Agent ⑥ Green Credits
+### ✅ Task 3 — Agent ⑤ Pricing + Agent ⑥ Green Credits
 **Branch:** `feat/agent-pricing-credits`  
 **Reference:** `action_plan.md → Phase 4 → Agent ⑤ — pricing.py` and `Agent ⑥ — green_credits.py`  
 **Est:** H3–H5  
@@ -216,7 +216,7 @@ def compute_credits(item: dict, grading: dict, nearest_buyer_dist_km: float) -> 
 
 ---
 
-### Task 4 — Agent ② Matching
+### ✅ Task 4 — Agent ② Matching
 **Branch:** `feat/agent-matching`  
 **Reference:** `action_plan.md → Phase 4 → Agent ② — matching.py`  
 **Est:** H5–H12  
@@ -260,7 +260,7 @@ def get_recommendations(buyer_id: str, limit: int = 10) -> list[dict]:
 
 ---
 
-### Task 5 — Agent ③ Passport
+### ✅ Task 5 — Agent ③ Passport
 **Branch:** `feat/agent-passport`  
 **Reference:** `action_plan.md → Phase 4 → Agent ③ — passport.py`  
 **Est:** H12–H16  
@@ -308,10 +308,27 @@ def generate_passport(item: dict, grading: dict, credits_data: dict) -> dict:
 
 ---
 
-### Task 6 — Seed Script
+### ✅ Task 6 — Seed Script
 **Branch:** `feat/seed`  
 **Reference:** `action_plan.md → Phase 8 — Seed Script`  
 **Est:** H16–H18  
+
+**Status: COMPLETE.** `backend/seed/seed.py` runs the full 9-step sequence end-to-end against real AWS. Final state: 30 buyers, 86 BuyerInterestIndex rows, 15 items graded + listed, all passports + all 30 recommendation caches pre-baked. Grade spread: 11×A, 1×B (ITM-002), 1×C (ITM-007), 2×D (ITM-008, ITM-015).
+
+Run with:
+```bash
+cd backend && python seed/seed.py          # incremental (reuses GradeCache)
+cd backend && python seed/seed.py --fresh  # wipes GradeCache, full re-bake
+```
+
+**Implementation notes / deviations from the original spec:**
+- **Photo folders** on disk are `seed/ITM_001 … ITM_015` (underscores); the script maps `ITM-001` → `ITM_001` via `.replace("-", "_")` and uploads to S3 as `photos/ITM-001/<file>.jpg`.
+- **`--fresh` flag** added: scans + batch-deletes all `GradeCache` rows before re-baking. Needed because grade/match/passport/recommendation results are cached as full objects keyed on inputs — changing an item's description or photo requires wiping the cache or the hero feed serves stale data. Use it whenever item descriptions or photos change.
+- **Step 7c (demo prevention flag)** added: a vision model cannot read shoe size from a photo, so the Nike "Fit Alert" can't originate from grading (`detected_size=unknown`). The plan's *predictive prevention* (carry forward flags from prior returns of the same `listing_id`) is satisfied by seeding a historical `ListingFlags` row for `LST-NIKE-AIR-270-BLK-10` (`flag_type=size, return_count_for_reason=23`). ITM-001 writes no flag itself (no size/color mismatch), so the orchestrator never overwrites it.
+- **Bug fixes made to land grading** (in Arush-owned agent files, required to make the pipeline run): `agents/matching.py` and `agents/passport.py` both did a bare `json.loads(content[0]["text"])` on the Bedrock response, which crashed on model preamble / reasoning blocks (`Expecting value: line 1 column 1`). Both now use the same `_extract_json` helper grading.py already had (strips code fences + `<think>` blocks, regex-extracts the first JSON object) and scan for the first content block that actually contains text.
+- **Seed-data edits** (in Anupam-owned `items.json`, to match the real photos the team shot): ITM-002 re-described as a worn olive t-shirt with light fading → grades **B**; ITM-004 re-branded to "Masala Potli — Ker Sangri Achaar 500g" with sealed-jar note to match the actual jar photo and pass the food guardrail.
+- **Latency**: step 9 reports ~200–500 ms, not <100 ms. This is network RTT to `ap-south-1` (buyer lookup + per-category index queries + cache read) from a dev laptop, **not** a Bedrock call — the cache is warm. Sub-100 ms applies only to local/co-located DynamoDB.
+
 
 Pull `main` to get Arush's `feat/orchestrator` if merged (~H20). If not merged yet, stub `process_existing_item` — you will swap it when Arush merges.
 
@@ -352,10 +369,12 @@ Seed photos: take 15 product photos with a phone. Name them `front.jpg`, `side.j
 
 ---
 
-### Task 7 — Demand-Side API Endpoints
+### ✅ Task 7 — Demand-Side API Endpoints
 **Branch:** `feat/api-demand`  
 **Reference:** `action_plan.md → Phase 6 — API Endpoints`  
 **Est:** H18–H24  
+
+**Status: COMPLETE.** All 8 demand-side routes added to `backend/main.py` (below the demand-side marker; supply routes/CORS/app scaffold untouched). Verified live against AWS: `/buyers`, `/buyers/{id}`, `/buyers/{id}/recommendations` (4 items, presigned URLs, DEMO_MODE cache-key check → BEDROCK_CACHE_MISS on cold cache, no Bedrock call), `/items/{id}`, `/items/{id}/passport` (reconstructs passport cache key, returns the 4 text fields), `/ops/items` (12 listed, ITM-001 top match BUY-001), `/notify-seller`, `/credits/redeem` (20% cap + ledger row). Reserved-word key expressions (`status`, `category`) are auto-aliased by `query_index`.
 
 Pull `main` to get the `main.py` file that Arush created in `feat/api-supply`. Add your routes to it. Do not touch or remove Arush's app scaffold, CORS config, or supply endpoints.
 
@@ -390,10 +409,11 @@ Implement these exactly per `action_plan.md → Phase 6`:
 
 ---
 
-### Task 8 — Frontend: Buyer Feed + Refurb Page + Ops Dashboard + Sell Flow
+### ✅ Task 8 — Frontend: Buyer Feed + Refurb Page + Ops Dashboard + Sell Flow
 **Branch:** `feat/frontend-demand`  
 **Reference:** `action_plan.md → Phase 7 → Screen 1, Screen 3, Screen 6, Screen 7`  
 **Est:** H24–H34  
+**Status: COMPLETE.** All four screens + four components built, TypeScript build passes clean, all routes return 200 with real API data.  
 
 All screens use `AmazonHeader` (created by Arush — pull `main` to get it). All data comes from API calls — never compute prices, credits, or risk in React.
 
@@ -488,7 +508,121 @@ Reference: `action_plan.md → Phase 7 → Screen 6 — P2P Seller Listing`
 - Category dropdown and return reason dropdown values must match the keys in `carbon_table.json` and common return codes.
 
 **Done when:** All 4 screens render with real API data. Credits toggle on `/refurb/ITM-001` updates the price. Ops dashboard shows risk colour-coding.  
+
+---
+
+### Frontend Implementation Notes (Task 8 — completed)
+
+#### Files created
+```
+frontend/
+  pages/index.tsx                     ← Screen 1 — hero recommendation feed
+  pages/refurb/[id].tsx               ← Screen 3 — refurb listing + passport + credits
+  pages/ops.tsx                       ← Screen 7 — ops dashboard
+  pages/sell.tsx                      ← Screen 6 — P2P seller listing
+  components/RecommendationCard.tsx   ← used by index.tsx
+  components/TrustPassport.tsx        ← used by refurb/[id].tsx
+  components/GreenImpact.tsx          ← used by refurb/[id].tsx and sell.tsx
+  components/CreditsRedemption.tsx    ← used by refurb/[id].tsx
+```
+Also scaffolded (shared with Arush's Task 9):
+```
+  .env.local  ·  styles/globals.css  ·  pages/_app.tsx  ·  pages/_document.tsx
+  components/PreventionBadge.tsx
+```
+
+#### How to run
+```bash
+# Terminal 1 — backend (from /ReVival/backend/)
+source ../.venv/bin/activate
+uvicorn main:app --reload --port 8000
+
+# Terminal 2 — frontend (from /ReVival/frontend/)
+npm run dev
+```
+Open `http://localhost:3000`.
+
+#### Screen 1 — `/` (Hero Recommendation Feed)
+- On mount: fetches `GET /buyers/BUY-001/recommendations?limit=10` in parallel with `AmazonHeader` fetching `GET /buyers/BUY-001` for name + credits badge.
+- Renders one `RecommendationCard` per item. Count shown ("4 items matched for you").
+- Each card layout (left photo, right details):
+  - CERTIFIED REFURB badge (orange) + GRADE badge (colour by grade: A=green, B=blue, C=orange, D=red).
+  - Product name bold 17px.
+  - ★★★★☆ "AI-graded condition report" in teal.
+  - Strikethrough original price (grey) → sale price (`#B12704`) → "Save X%" (green). Savings % computed from the two API-provided prices.
+  - Leaf SVG — CO₂ saved + credits from API.
+  - Pin SVG — hub city + ship ETA from API.
+  - Shield SVG — `why_this_fits` in italics from API (never generated in React).
+  - "View Trust Passport" link (blue) + "Add to Cart" orange button → both go to `/refurb/{item_id}`.
+- Error state shown if backend is down.
+- Demo URL: `http://localhost:3000`
+
+#### Screen 3 — `/refurb/[id]` (Refurb Listing Page)
+- Fetches `GET /items/{id}`, `GET /items/{id}/passport`, and `GET /buyers/BUY-001` in parallel.
+- Left column: main photo (340×340) with thumbnail strip. Click thumbnail switches main photo.
+- Right column:
+  - Badges: "Certified Second Life" (orange), "GRADE X" (colour-coded), "N PREVIOUS OWNER".
+  - Title, ★★★★☆ rating, strikethrough original → current price in `#B12704`.
+  - `GreenImpact` component: green pill — CO₂ saved + credits from API.
+  - Size and colour from API.
+  - `CreditsRedemption` component: shows buyer's credit balance, "Apply N credits → ₹X" preview. On click calls `POST /credits/redeem` with `credits_to_use = min(credit_score, 50)`. On success replaces displayed price with `final_price_inr` from response — one-way apply.
+  - Add to Cart + Buy Now orange buttons.
+- Below: `TrustPassport` component (green-bordered panel) — summary, condition, why returned, buyer reassurance, "View full passport →" link opens S3 presigned URL in new tab.
+- Demo URL: `http://localhost:3000/refurb/ITM-001`
+
+#### Screen 7 — `/ops` (Ops Dashboard)
+- Fetches `GET /ops/items?limit=50` on mount and on every status filter change.
+- Filter bar: Status dropdown (All / pending / listed / manual_review / recycle / donate / refurbish) + Refresh button + item count.
+- Per item card:
+  - Header row: `item_id · name` + status badge (colour-coded) + grade badge.
+  - Route and price (red).
+  - Mismatch flag: yellow pill "[!] Size mismatch detected" and/or "Color mismatch detected" when flags are true.
+  - TOP MATCH buyer_id + risk badge — **colour-coded by value**: `< 0.10` → green bg ("low risk"), `0.10–0.25` → amber ("medium risk"), `> 0.25` → red ("high risk"). Risk shown as percentage.
+  - "View Item" button (blue border) → `/refurb/{item_id}`.
+  - "Notify Seller" button (orange) → calls `POST /notify-seller`. Button disables and shows "Notified" after call.
+- Demo URL: `http://localhost:3000/ops`
+
+#### Screen 6 — `/sell` (P2P Seller Listing)
+- Two-column form grid: item name, category (13 options), brand, condition dropdown (returned_open_box / lightly_used / good_condition / well_used), asking price, ship-from city, size, colour.
+- Drag-and-drop photo area (up to 5 photos).
+- On submit: `POST /community-list` multipart with `seller_keeps_item: true`, `seller_id: BUY-001`, `listing_price_inr`.
+- **Approved result (grade A/B/C):** grade badge + green "APPROVED" badge + asking price. Shield SVG "Trust Passport generated — buyers can see it". Leaf SVG CO₂ saved + credits. "View Your Listing →" (→ `/refurb/{item_id}`) + "Edit Price" button.
+- **Review/recycle result (grade D/REVIEW):** yellow warning — "Item needs review — our team will contact you within 24 hours."
+- Demo URL: `http://localhost:3000/sell`
+
+#### Design system applied
+- All inline styles — no Tailwind/CSS modules.
+- SVG icons: leaf (`#2d6a4f`), shield (`#146EB4`), pin (`#555`), warning triangle (`#856404`).
+- No emojis anywhere.
+- Prices in `#B12704` red, savings in `#2d6a4f` green, CTAs `#FF9900` orange, secondary links `#146EB4` blue, body bg `#EAEDED`, header `#232F3E` navy.
 **Merge:** `feat/frontend-demand` → `main`.
+
+---
+
+### Frontend Hardening Update (post-MVP — functional cart, checkout, passport modal)
+
+After the first frontend pass, the following were added to make the site fully functional end-to-end and more robust. The items below touch Anupam-owned components.
+
+#### `components/TrustPassport.tsx` (Anupam-owned) — "View full passport" UI fix
+- The first version opened the raw, unstyled S3 HTML file in a new tab (ugly serif page).
+- Now "View full passport →" opens a polished **in-app certificate modal**: navy header band with shield icon, grade badge, labelled "Condition Report" / "Reason for Return" sections, a green reassurance panel, and a footer with item ID + a small "Open certificate document ↗" link to the original S3 file as a fallback.
+- New optional props: `item_id`, `grade` (passed from `refurb/[id].tsx`).
+
+#### `components/RecommendationCard.tsx` (Anupam-owned) — working Add to Cart
+- "Add to Cart" was previously a navigation link; it now actually adds the item to the cart via `lib/cart.ts` and shows "✓ Added to Cart" feedback.
+- The product photo and title are now the links to `/refurb/{item_id}`.
+- Image `onError` fallback ("No photo") for expired presigned URLs; savings % guards divide-by-zero.
+
+#### `pages/refurb/[id].tsx` (Anupam-owned) — working Add to Cart + Buy Now
+- "Add to Cart" adds the item at the **currently displayed price** (i.e. respects an applied credits discount) and shows a "Go to Cart →" link.
+- "Buy Now" routes to `/order-confirm` with the item's price, CO₂, and credits.
+- Passes `item_id` + `grade` to the Trust Passport modal; main photo has an error fallback that resets on thumbnail switch.
+
+#### New shared files (also documented in Arush.md)
+- **`lib/cart.ts`** — `localStorage` cart store (`secondlife_cart`) broadcasting a `cart-updated` event. API: `getCart`, `addToCart`, `isInCart`, `removeFromCart`, `clearCart`, `cartCount`.
+- **`pages/cart.tsx`** — shopping cart screen (items, remove, subtotal + total CO₂, checkout → clears cart → `/order-confirm`, empty state).
+- **`pages/order-confirm.tsx`** — Screen 8 (Order Confirmation Green Impact), not built in the first pass. Shows order #, CO₂ saved + equivalent km, credits added → new balance.
+- The **AmazonHeader** cart icon now shows a live count badge and links to `/cart`; a global nav strip (Second Life · Original PDP · Sell · Returns · Ops) was added.
 
 ---
 
@@ -540,6 +674,21 @@ npm run dev
 
 FastAPI docs: `http://localhost:8000/docs`  
 Hero screen: `http://localhost:3000`
+
+---
+
+## Fixes Applied (Post Code-Review)
+
+These fixes were made to Arush's supply-side code during a joint code review. They affect interfaces Anupam's code consumes — no changes required on the demand side, but be aware of the corrected behaviour.
+
+### Fix A — `POST /community-list` price now persisted correctly (`main.py`)
+Arush's endpoint now writes the seller's `listing_price_inr` to DynamoDB after the orchestrator runs. Your `GET /items/{item_id}` and `GET /ops/items` endpoints will now read the correct seller-set price without any changes on your side.
+
+### Fix B — Size-mismatch flag is now fully deterministic (`agents/grading.py`)
+`_normalize_size` previously left `size_mismatch` unchanged when the vision model already returned an India-format size. Fixed: `size_mismatch` is now always recomputed by normalizing both sides. Downstream passport and matching code can trust `grading["size_mismatch"]` unconditionally.
+
+### Fix C — `CreditsLedger` `action` field clarified (`orchestrator.py`)
+Green credits earned on item resale now use `action: "earn"`. Trade-in store credit (exchange route) remains `action: "trade_in_credit"`. If your `seed.py` or frontend reads the ledger, filter by the correct action string.
 
 ---
 

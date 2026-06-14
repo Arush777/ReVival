@@ -104,7 +104,7 @@ Work through tasks in order. Each task has a git branch. Merge to `main` when th
 
 ---
 
-### Task 1 — AWS + Environment Setup
+### ✅ Task 1 — AWS + Environment Setup
 **Branch:** `feat/infra-env`  
 **Reference:** `action_plan.md → Phase 0 — Environment Setup`  
 **Est:** H0–H1  
@@ -125,7 +125,7 @@ Work through tasks in order. Each task has a git branch. Merge to `main` when th
 
 ---
 
-### Task 2 — DynamoDB Tables + S3 + DB Helpers
+### ✅ Task 2 — DynamoDB Tables + S3 + DB Helpers
 **Branch:** `feat/infra-db`  
 **Reference:** `action_plan.md → Phase 1 — DynamoDB Tables` and `action_plan.md → Phase 4 → db/dynamo.py` and `db/s3.py`  
 **Est:** H1–H3  
@@ -202,7 +202,7 @@ s3.create_bucket(
 
 ---
 
-### Task 3 — cache.py
+### ✅ Task 3 — cache.py
 **Branch:** `feat/cache`  
 **Reference:** `action_plan.md → Phase 4 → cache.py`  
 **Est:** H3–H4  
@@ -224,7 +224,7 @@ def cache_put(key: str, agent: str, result: dict) -> None
 
 ---
 
-### Task 4 — Agent ① Grading
+### ✅ Task 4 — Agent ① Grading
 **Branch:** `feat/agent-grading`  
 **Reference:** `action_plan.md → Phase 4 → Agent ① — grading.py`  
 **Est:** H4–H10  
@@ -268,7 +268,7 @@ def grade_item(item: dict, photo_keys: list[str]) -> dict:
 
 ---
 
-### Task 5 — Agent ④ Disposition
+### ✅ Task 5 — Agent ④ Disposition
 **Branch:** `feat/agent-disposition`  
 **Reference:** `action_plan.md → Phase 4 → Agent ④ — disposition.py`  
 **Est:** H10–H12  
@@ -289,7 +289,7 @@ def compute_disposition(item: dict, grade: str, trade_in_requested: bool = False
 
 ---
 
-### Task 6 — Agent ⑦ Prevention
+### ✅ Task 6 — Agent ⑦ Prevention
 **Branch:** `feat/agent-prevention`  
 **Reference:** `action_plan.md → Phase 4 → Agent ⑦ — prevention.py`  
 **Est:** H12–H15  
@@ -313,7 +313,7 @@ Key rules:
 
 ---
 
-### Task 7 — Orchestrator
+### ✅ Task 7 — Orchestrator
 **Branch:** `feat/orchestrator`  
 **Reference:** `action_plan.md → Phase 5 — Orchestrator`  
 **Est:** H15–H20  
@@ -346,7 +346,7 @@ Also implement `process_existing_item(item_id)` for use by Anupam's `seed.py` �
 
 ---
 
-### Task 8 — Supply-Side API Endpoints
+### ✅ Task 8 — Supply-Side API Endpoints
 **Branch:** `feat/api-supply`  
 **Reference:** `action_plan.md → Phase 6 — API Endpoints`  
 **Est:** H20–H24  
@@ -399,10 +399,11 @@ Exact Amazon-style header per `action_plan.md → Phase 7 → Amazon UI/UX basel
 
 ---
 
-### Task 9 — Frontend: Return Flow + Prevention Screen
+### ✅ Task 9 — Frontend: Return Flow + Prevention Screen
 **Branch:** `feat/frontend-supply`  
 **Reference:** `action_plan.md → Phase 7 → Screen 4, Screen 5, Screen 2`  
 **Est:** H24–H32  
+**Status: COMPLETE.** All three screens built, TypeScript build passes clean, all routes return 200 with real API data.  
 
 All three screens use `AmazonHeader`. All data comes from API calls — never compute prices, credits, or risk in React.
 
@@ -443,6 +444,94 @@ Renders a yellow-bordered alert box: `[!] FIT ALERT` or `[!] COLOR ALERT`, count
 
 **Done when:** `/return` page renders, submits, and shows the result. `/exchange` page renders correctly from query params. `/product/LST-NIKE-AIR-270-BLK-10` shows the fit alert badge.  
 **Merge:** `feat/frontend-supply` → `main`.
+
+---
+
+### Frontend Implementation Notes (Task 9 — completed)
+
+#### Files created
+```
+frontend/
+  .env.local                          ← NEXT_PUBLIC_API_BASE_URL + NEXT_PUBLIC_DEMO_BUYER_ID
+  styles/globals.css                  ← body reset, font, #EAEDED background
+  pages/_app.tsx                      ← imports globals.css
+  pages/_document.tsx                 ← HTML scaffold
+  pages/return.tsx                    ← Screen 4
+  pages/exchange.tsx                  ← Screen 5
+  pages/product/[id].tsx              ← Screen 2
+  components/PreventionBadge.tsx      ← shared, used by product/[id].tsx
+```
+
+#### How to run
+```bash
+# Terminal 1 — backend (from /ReVival/backend/)
+source ../.venv/bin/activate
+uvicorn main:app --reload --port 8000
+
+# Terminal 2 — frontend (from /ReVival/frontend/)
+npm run dev
+```
+Open `http://localhost:3000`.
+
+#### Screen 4 — `/return` (Returns Flow)
+- Two-column form grid: item name, category dropdown (all 13 carbon_table categories), brand, return reason dropdown (8 codes), original price, hub city, size, colour.
+- Drag-and-drop photo upload area (min 1 file). "Trade-in for store credit" checkbox.
+- On submit: `POST /returns` multipart. Shows spinner ("Processing...") during the call.
+- **Standard return result:** green banner "Your item earns a second life" + 4 info tiles (Grade, Route, Credits, CO₂). "Continue with Return →" goes home.
+- **Trade-in branch:** if `disposition === "exchange"` the page redirects automatically to `/exchange` passing item_id, name, grade, credit, co2, credits as query params.
+- **Manual review / Grade D:** yellow warning box — "Item flagged for manual review."
+
+#### Screen 5 — `/exchange` (Trade-in Confirmation)
+- Reads all data from URL query params — no extra API call needed.
+- Green checkmark header "Trade-in complete!"
+- Item name + grade badge + trade-in value in `#B12704` red.
+- Orange-bordered credit wallet panel: "₹X store credit. Valid on Second Life certified listings only." + "Browse Second Life listings →" CTA (links to `/`).
+- Green CO₂ + credits earned banner below.
+- "← Back to Home" link.
+- Demo URL: `http://localhost:3000/exchange?item_id=ITM-001&name=Nike+Air+Max+270&grade=A&credit=1665&co2=14.1&credits=141`
+
+#### Screen 2 — `/product/[id]` (Original PDP + Prevention Widget)
+- Route param `id` is the `listing_id` (e.g. `LST-NIKE-AIR-270-BLK-10`).
+- Fetches `GET /listings/{id}/warning` AND `GET /items/ITM-001` in parallel on mount.
+- Fake PDP content: Nike Air Max 270, ₹9,999, ★★★★☆ 2,341 ratings, Add to Cart + Buy Now buttons.
+- If `has_warning: true`: `PreventionBadge` renders above the Second Life panel — yellow-bordered box with SVG warning triangle, "[!] FIT ALERT" or "[!] COLOR ALERT", count, recommendation text, "Based on verified return data — AI-analysed".
+- Second Life panel: green-bordered box with leaf SVG, grade, price, savings vs new, hub city, "View Certified Second Life →" link to `/refurb/ITM-001`.
+- Demo URL: `http://localhost:3000/product/LST-NIKE-AIR-270-BLK-10`
+
+#### Design system applied
+- All inline styles — no Tailwind/CSS modules needed.
+- SVG icons: leaf (green impact `#2d6a4f`), shield (trust `#146EB4`), pin (location `#555`), warning triangle (`#856404`).
+- No emojis anywhere.
+- Prices in `#B12704`, savings in `#2d6a4f`, CTAs `#FF9900`, secondary links `#146EB4`.
+
+---
+
+### Frontend Hardening Update (post-MVP — functional cart, checkout, navigation)
+
+After the first frontend pass, the following were added to make the site fully functional end-to-end (no dead buttons) and more robust. Shared/new files; the items below touch Arush-owned surfaces.
+
+#### `components/AmazonHeader.tsx` (Arush-owned) — cart badge + global nav
+- Cart icon is now a `<Link href="/cart">` with a live orange count badge driven by the cart store.
+- Logo links to `/`.
+- New **secondary nav strip** (`#37475A`) rendered on every page: Second Life · Original PDP · Sell Your Item · Returns · Ops. Previously the only way to move between screens was typing URLs.
+- Subscribes to the `cart-updated` window event + `storage` event so the badge updates instantly across tabs/components.
+
+#### `pages/product/[id].tsx` (Arush-owned) — working buy buttons
+- The original (new) product's "Add to Cart" and "Buy Now" are now functional: Add to Cart adds a `NIKE-NEW-270` line at ₹9,999 (0 CO₂); Buy Now routes to `/order-confirm`. This makes the demo's "buy new vs Second Life" contrast tangible while keeping the Second Life CTA prominent.
+- `SecondLifeItem` interface extended with `brand`, `name`, `co2_saved_kg`, `credits`.
+
+#### New shared files
+- **`lib/cart.ts`** — client-side cart (no backend cart endpoint in MVP scope). Stored in `localStorage` under `secondlife_cart`, broadcasts a `cart-updated` event. API: `getCart`, `addToCart`, `isInCart`, `removeFromCart`, `clearCart`, `cartCount`. SSR-safe (guards `window`).
+- **`pages/cart.tsx`** — shopping cart screen: item list (photo + grade + price), remove, order summary with subtotal + total CO₂, "Proceed to Checkout" (clears cart → `/order-confirm`), empty state.
+- **`pages/order-confirm.tsx`** — Screen 8 (Order Confirmation Green Impact), which had not been built in the first pass. Reads `total`, `co2`, `credits`, `items` query params; fetches buyer name for the greeting; shows order #, green-impact panel (CO₂ saved + equivalent km driven + credits added → new balance). When `co2 = 0` (buying new) it shows a "switch to Second Life" nudge instead.
+
+#### Robustness
+- Image `onError` fallbacks on recommendation cards, refurb photos, and cart (presigned S3 URLs expire in 15 min — broken images now show "No photo").
+- Refurb thumbnail switch resets the image-error flag; savings % guards divide-by-zero.
+- Backend CORS now splits `CORS_ORIGINS` on commas and accepts `http://localhost:3000` **and** `:3001` (Next.js falls back to 3001 when 3000 is busy — this previously silently blocked all API calls).
+
+#### "View full passport" UI fix
+- Previously opened the raw, unstyled S3 HTML. Now opens a polished **in-app certificate modal** inside `TrustPassport.tsx` (Anupam-owned component) — navy header band, grade badge, labelled sections, with a small "Open certificate document ↗" fallback link to the original S3 file.
 
 ---
 
@@ -493,6 +582,24 @@ npm run dev
 
 Health check: `curl http://localhost:8000/health`  
 FastAPI docs: `http://localhost:8000/docs`
+
+---
+
+## Fixes Applied (Post Code-Review)
+
+The following bugs were found during a code review and patched after the original merge.
+
+### Fix A — `POST /community-list` price not persisted (`main.py`)
+**Problem:** `listing_price_inr` was only patched onto the JSON response; DynamoDB still held the system-computed base price, so downstream reads (`GET /items`, ops dashboard, recommendations) showed the wrong price.  
+**Fix:** After the result is assembled, `update_item("Items", ...)` is called to persist the seller's asking price to the `Items` table before returning.
+
+### Fix B — Size-mismatch determinism when model already returns India-format size (`agents/grading.py`)
+**Problem:** `_normalize_size` returned early if `detected_size` was not a key in `size_standard_map` (e.g. `"India 9"` is a *value* in the map, not a key). This meant `size_mismatch` was never recomputed in that case, leaving the model's own boolean unchecked against the normalized `listed_size`.  
+**Fix:** When `detected_size` is not a key in the map (already normalized or unknown format), it is used as-is. The `listed_size` is still normalized and compared, so `size_mismatch` is always recomputed deterministically.
+
+### Fix C — `CreditsLedger` action name collision (`orchestrator.py`)
+**Problem:** `append_credits_ledger` (which records green CO₂ credits earned when an item is resold) wrote `action: "trade_in_credit"`. This collides with the exchange/trade-in store-credit action defined in the spec, making ledger queries ambiguous.  
+**Fix:** Green credits earned on resale now use `action: "earn"`. The exchange trade-in store credit (INR-denominated, disposition route) keeps `action: "trade_in_credit"` as specified.
 
 ---
 

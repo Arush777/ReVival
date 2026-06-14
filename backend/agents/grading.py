@@ -179,11 +179,14 @@ def _normalize_size(item: dict, obs: dict) -> None:
     if not detected or detected == "unknown":
         return
 
-    if detected not in cat_map:
-        return
-
-    normalized_detected = cat_map[detected]
-    obs["detected_size"] = normalized_detected
+    # If detected is a key in the map (e.g. "US 10"), translate it.
+    # If not (e.g. model already returned "India 9"), treat it as already
+    # normalized — still recompute size_mismatch against the listed size.
+    if detected in cat_map:
+        normalized_detected = cat_map[detected]
+        obs["detected_size"] = normalized_detected
+    else:
+        normalized_detected = detected
 
     listed = item.get("listed_size", "")
     normalized_listed = cat_map.get(listed, listed)

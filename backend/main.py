@@ -21,9 +21,15 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="SecondLife Backend")
 
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.environ.get("CORS_ORIGINS", "http://localhost:3000")],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -112,9 +118,12 @@ async def post_community_list(
     if result.get("grade") in ("D", "REVIEW"):
         return {"status": result.get("disposition", "manual_review")}
 
-    # Use seller-set listing price when provided
+    # Use seller-set listing price when provided; persist to DynamoDB so
+    # downstream reads (recommendations, ops) see the correct asking price.
     if listing_price_inr is not None:
-        result["base_price_inr"] = int(listing_price_inr)
+        price = int(listing_price_inr)
+        result["base_price_inr"] = price
+        update_item("Items", {"item_id": result["item_id"]}, {"base_price_inr": price})
 
     return result
 
@@ -130,3 +139,297 @@ async def get_listing_warning(listing_id: str):
 # ---------------------------------------------------------------------------
 # Demand-side endpoints (Anupam adds here in feat/api-demand)
 # ---------------------------------------------------------------------------
+
+from db.dynamo import query_index, table, from_ddb
+from db.s3 import presign_photo, presign_passport
+from cache import make_cache_key, cache_get
+from agents.matching import get_recommendations as _get_recommendations
+from fastapi.responses import JSONResponse
+
+_DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
+
+
+@app.get("/buyers")
+async def get_buyers(
+    region: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 50,
+):
+    resp = table("Buyers").scan()
+    buyers = from_ddb(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table("Buyers").scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+        buyers.extend(from_ddb(resp.get("Items", [])))
+
+    if region:
+        buyers = [b for b in buyers if b.get("region") == region]
+    if category:
+        buyers = [
+            b for b in buyers
+            if category in b.get("category_interests", [])
+            or b.get("primary_category") == category
+        ]
+
+    return {
+        "buyers": [
+            {
+                "buyer_id": b["buyer_id"],
+                "name": b.get("name", ""),
+                "region": b.get("region", ""),
+                "primary_category": b.get("primary_category", ""),
+                "credit_score": b.get("credit_score", 0),
+                "return_rate": b.get("return_rate", 0.0),
+            }
+            for b in buyers[:limit]
+        ]
+    }
+
+
+@app.get("/buyers/{buyer_id}")
+async def get_buyer(buyer_id: str):
+    buyer = get_item("Buyers", {"buyer_id": buyer_id})
+    if not buyer:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Buyer {buyer_id} not found", "details": {}}},
+        )
+    return buyer
+
+
+@app.get("/buyers/{buyer_id}/recommendations")
+async def get_buyer_recommendations(buyer_id: str, limit: int = 10):
+    limit = min(limit, 25)
+
+    if _DEMO_MODE:
+        buyer = get_item("Buyers", {"buyer_id": buyer_id})
+        if not buyer:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": {"code": "NOT_FOUND", "message": f"Buyer {buyer_id} not found", "details": {}}},
+            )
+        # Replicate _query_items_for_buyer to build the cache key without calling Bedrock
+        seen: set = set()
+        candidates: list = []
+        for cat in buyer.get("category_interests", []):
+            rows = query_index(
+                "Items", "StatusCategoryIndex",
+                "status = :s AND category = :c",
+                {":s": "listed", ":c": cat},
+            )
+            for row in rows:
+                if row["item_id"] not in seen:
+                    seen.add(row["item_id"])
+                    candidates.append(row)
+            if len(candidates) >= 50:
+                break
+        candidates = candidates[:50]
+
+        sorted_ids = json.dumps(sorted(i["item_id"] for i in candidates))
+        cache_key = make_cache_key(
+            "recommendations", buyer_id.encode(), sorted_ids, "v1",
+            os.environ["BEDROCK_TEXT_MODEL_ID"],
+        )
+        if not cache_get(cache_key):
+            return JSONResponse(
+                status_code=503,
+                content={"error": {
+                    "code": "BEDROCK_CACHE_MISS",
+                    "message": "Recommendation cache is cold. Run seed.py to warm the cache.",
+                    "details": {},
+                }},
+            )
+
+    items = _get_recommendations(buyer_id, limit)
+    enriched = []
+    for item in items:
+        photo_keys = item.get("photo_keys", [])
+        photo_url = presign_photo(photo_keys[0]) if photo_keys else ""
+        passport_key = item.get("passport_key", "")
+        passport_url = presign_passport(passport_key) if passport_key else ""
+        enriched.append({
+            "item_id": item.get("item_id", ""),
+            "listing_id": item.get("listing_id", ""),
+            "brand": item.get("brand", ""),
+            "name": item.get("name", ""),
+            "category": item.get("category", ""),
+            "grade": item.get("grade", ""),
+            "original_price_inr": item.get("original_price_inr", 0),
+            "price_inr": item.get("price_inr", item.get("base_price_inr", 0)),
+            "photo_url": photo_url,
+            "passport_url": passport_url,
+            "return_hub_city": item.get("return_hub_city", ""),
+            "ship_eta_days": item.get("ship_eta_days", 1),
+            "co2_saved_kg": item.get("co2_saved_kg", 0),
+            "credits": item.get("credits", 0),
+            "re_return_risk": item.get("re_return_risk", 0.0),
+            "why_this_fits": item.get("why_this_fits", ""),
+        })
+    return {"buyer_id": buyer_id, "items": enriched}
+
+
+@app.get("/items/{item_id}")
+async def get_item_detail(item_id: str):
+    item = get_item("Items", {"item_id": item_id})
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Item {item_id} not found", "details": {}}},
+        )
+    photo_urls = [presign_photo(k) for k in item.get("photo_keys", [])]
+    passport_key = item.get("passport_key", "")
+    passport_url = presign_passport(passport_key) if passport_key else ""
+    return {
+        "item_id": item["item_id"],
+        "listing_id": item.get("listing_id", ""),
+        "category": item.get("category", ""),
+        "brand": item.get("brand", ""),
+        "name": item.get("name", ""),
+        "status": item.get("status", ""),
+        "grade": item.get("grade", ""),
+        "disposition": item.get("disposition", ""),
+        "original_price_inr": item.get("original_price_inr", 0),
+        "base_price_inr": item.get("base_price_inr", 0),
+        "listed_size": item.get("listed_size", ""),
+        "listed_color": item.get("listed_color", ""),
+        "return_reason_code": item.get("return_reason_code", ""),
+        "return_reason_text": item.get("return_reason_text", ""),
+        "return_hub_city": item.get("return_hub_city", ""),
+        "photo_urls": photo_urls,
+        "passport_url": passport_url,
+        "co2_saved_kg": item.get("co2_saved_kg", 0),
+        "credits": item.get("credits", 0),
+        "matches": item.get("matches", []),
+    }
+
+
+@app.get("/items/{item_id}/passport")
+async def get_item_passport(item_id: str):
+    item = get_item("Items", {"item_id": item_id})
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Item {item_id} not found", "details": {}}},
+        )
+    passport_key = item.get("passport_key", f"passports/{item_id}.html")
+    passport_url = presign_passport(passport_key)
+
+    grade = item.get("grade", "")
+    defects = item.get("defects", [])
+    history_note = item.get("history_note", "")
+    co2_saved_kg = item.get("co2_saved_kg", 0)
+    secondary_str = (
+        grade
+        + str(sorted(str(d) for d in defects))
+        + history_note
+        + str(co2_saved_kg)
+    )
+    cache_key = make_cache_key(
+        "passport", item_id.encode(), secondary_str,
+        "v1", os.environ["BEDROCK_TEXT_MODEL_ID"],
+    )
+    raw = cache_get(cache_key)
+    _PASSPORT_KEYS = {"summary", "condition_statement", "why_returned", "buyer_reassurance"}
+    passport = {k: v for k, v in raw.items() if k in _PASSPORT_KEYS} if raw else raw
+    return {"item_id": item_id, "passport_url": passport_url, "passport": passport}
+
+
+@app.get("/ops/items")
+async def get_ops_items(status: Optional[str] = None, limit: int = 50):
+    if status:
+        rows = query_index(
+            "Items", "StatusCategoryIndex",
+            "status = :s",
+            {":s": status},
+        )
+    else:
+        resp = table("Items").scan()
+        rows = from_ddb(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = table("Items").scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            rows.extend(from_ddb(resp.get("Items", [])))
+
+    ops_items = []
+    for item in rows[:limit]:
+        matches = item.get("matches", [])
+        top = matches[0] if matches else {}
+        ops_items.append({
+            "item_id": item.get("item_id", ""),
+            "name": item.get("name", ""),
+            "status": item.get("status", ""),
+            "grade": item.get("grade", ""),
+            "disposition": item.get("disposition", ""),
+            "base_price_inr": item.get("base_price_inr", 0),
+            "top_match_buyer_id": top.get("buyer_id"),
+            "top_match_risk": top.get("re_return_risk"),
+            "size_mismatch": item.get("size_mismatch", False),
+            "color_mismatch": item.get("color_mismatch", False),
+        })
+    return {"items": ops_items}
+
+
+@app.post("/notify-seller")
+async def notify_seller(body: dict):
+    logging.info(
+        f"[notify-seller] item={body.get('item_id')} event={body.get('event')} "
+        f"seller={body.get('seller_id')}"
+    )
+    return {"notified": True, "channel": "log"}
+
+
+@app.post("/credits/redeem")
+async def redeem_credits(body: dict):
+    buyer_id = body.get("buyer_id")
+    item_id = body.get("item_id")
+    credits_to_use = int(body.get("credits_to_use", 0))
+
+    # Step 1: Load buyer and item
+    buyer = get_item("Buyers", {"buyer_id": buyer_id})
+    if not buyer:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Buyer {buyer_id} not found", "details": {}}},
+        )
+    item = get_item("Items", {"item_id": item_id})
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Item {item_id} not found", "details": {}}},
+        )
+
+    base_price = item.get("base_price_inr", 0)
+
+    # Step 2: Compute credits_applied — capped at 20% of item price
+    credits_applied = min(
+        credits_to_use,
+        buyer.get("credit_score", 0),
+        round(base_price * 0.20),
+    )
+
+    # Step 3: Final price
+    final_price = base_price - credits_applied
+
+    # Step 4: Decrement credit_score in Buyers
+    new_credit_score = buyer.get("credit_score", 0) - credits_applied
+    update_item("Buyers", {"buyer_id": buyer_id}, {"credit_score": new_credit_score})
+
+    # Step 5: Write CreditsLedger row
+    now_iso = datetime.now(timezone.utc).isoformat()
+    put_item("CreditsLedger", {
+        "buyer_id": buyer_id,
+        "event_id": f"{now_iso}#{item_id}#redemption",
+        "timestamp": now_iso,
+        "item_id": item_id,
+        "action": "redemption",
+        "credits": -credits_applied,
+        "co2_saved_kg": 0,
+    })
+
+    # Step 6: Return response
+    return {
+        "buyer_id": buyer_id,
+        "item_id": item_id,
+        "credits_used": credits_applied,
+        "discount_inr": credits_applied,
+        "final_price_inr": final_price,
+        "remaining_credits": new_credit_score,
+    }

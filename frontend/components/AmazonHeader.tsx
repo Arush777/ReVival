@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { cartCount, CART_EVENT } from "../lib/cart";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
@@ -26,6 +28,7 @@ function CartIcon() {
 
 export default function AmazonHeader() {
   const [buyer, setBuyer] = useState<BuyerInfo | null>(null);
+  const [count, setCount] = useState(0);
 
   useEffect(() => {
     fetch(`${API_BASE}/buyers/${BUYER_ID}`)
@@ -38,6 +41,17 @@ export default function AmazonHeader() {
       .catch(() => {
         // Never crash the page if the API is down
       });
+  }, []);
+
+  useEffect(() => {
+    const sync = () => setCount(cartCount());
+    sync();
+    window.addEventListener(CART_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(CART_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
   }, []);
 
   return (
@@ -53,7 +67,8 @@ export default function AmazonHeader() {
         }}
       >
         {/* Logo */}
-        <div
+        <Link
+          href="/"
           style={{
             fontSize: "20px",
             fontFamily: "Arial, sans-serif",
@@ -64,10 +79,12 @@ export default function AmazonHeader() {
             cursor: "pointer",
             letterSpacing: "-0.5px",
             flexShrink: 0,
+            color: "white",
+            textDecoration: "none",
           }}
         >
           amazon<span style={{ color: "#FF9900" }}>.in</span>
-        </div>
+        </Link>
 
         {/* Deliver to */}
         <div style={{ fontSize: "12px", flexShrink: 0, lineHeight: "1.3" }}>
@@ -166,19 +183,86 @@ export default function AmazonHeader() {
         )}
 
         {/* Cart */}
+        <Link
+          href="/cart"
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "4px",
+            cursor: "pointer",
+            flexShrink: 0,
+            color: "white",
+            textDecoration: "none",
+            position: "relative",
+          }}
+        >
+          <div style={{ position: "relative" }}>
+            <CartIcon />
+            {count > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-8px",
+                  right: "-8px",
+                  backgroundColor: "#FF9900",
+                  color: "#000",
+                  borderRadius: "50%",
+                  minWidth: "18px",
+                  height: "18px",
+                  fontSize: "11px",
+                  fontWeight: "bold",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 4px",
+                }}
+              >
+                {count}
+              </span>
+            )}
+          </div>
+          <span style={{ fontSize: "14px", fontWeight: "bold" }}>Cart</span>
+        </Link>
+      </div>
+
+      {/* Secondary nav strip */}
+      <nav style={{ backgroundColor: "#37475A", borderTop: "1px solid #3a4553" }}>
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "4px",
-            cursor: "pointer",
-            flexShrink: 0,
+            gap: "18px",
+            padding: "6px 16px",
+            maxWidth: "1400px",
+            margin: "0 auto",
+            fontSize: "13px",
+            flexWrap: "wrap",
           }}
         >
-          <CartIcon />
-          <span style={{ fontSize: "14px", fontWeight: "bold" }}>Cart</span>
+          <NavLink href="/" label="Second Life" />
+          <NavLink href="/product/LST-NIKE-AIR-270-BLK-10" label="Original PDP" />
+          <NavLink href="/sell" label="Sell Your Item" />
+          <NavLink href="/return" label="Returns" />
+          <NavLink href="/ops" label="Ops Dashboard" />
         </div>
-      </div>
+      </nav>
     </header>
+  );
+}
+
+function NavLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      style={{
+        color: "white",
+        textDecoration: "none",
+        fontWeight: "bold",
+        padding: "2px 4px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </Link>
   );
 }

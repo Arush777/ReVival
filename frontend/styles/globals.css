@@ -1,0 +1,32 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #EAEDED;
+  color: #0F1111;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+a {
+  color: #146EB4;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  color: #C7511F;
+}
+
+button {
+  cursor: pointer;
+  font-family: Arial, sans-serif;
+}
+
+input, select, textarea {
+  font-family: Arial, sans-serif;
+}

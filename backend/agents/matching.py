@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import re
 
 import boto3
 
@@ -143,6 +144,18 @@ def compute_risk(buyer: dict, item: dict, grading: dict, llm_signal: dict) -> fl
     return round(sigmoid(6 * (risk_raw - 0.5)), 4)
 
 
+def _extract_json(text: str) -> dict:
+    """Strip code fences, find first JSON object, parse it."""
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```\s*", "", text)
+    # Some models wrap output in <think>...</think> — strip it
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object in model response: {text[:300]!r}")
+    return json.loads(match.group(0))
+
+
 def _call_bedrock(system_prompt: str, user_msg: str) -> dict:
     response = _bedrock.converse(
         modelId=MODEL_ID,
@@ -150,7 +163,11 @@ def _call_bedrock(system_prompt: str, user_msg: str) -> dict:
         messages=[{"role": "user", "content": [{"text": user_msg}]}],
         inferenceConfig={"temperature": 0},
     )
-    return json.loads(response["output"]["message"]["content"][0]["text"])
+    # Find the first content block that actually contains text
+    # (some models return a reasoning/thinking block before the text block)
+    content_blocks = response["output"]["message"]["content"]
+    raw_text = next((c["text"] for c in content_blocks if "text" in c), "")
+    return _extract_json(raw_text)
 
 
 def _size_filter(candidates: list[dict], grading: dict) -> list[dict]:
