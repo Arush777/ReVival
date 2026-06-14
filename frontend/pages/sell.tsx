@@ -139,11 +139,11 @@ export default function SellPage() {
     return () => { urls.forEach((u) => URL.revokeObjectURL(u)); };
   }, [photos]);
 
-  // Live price recommendation: debounced on askingPrice / mrpPrice / category / conditionNote / hubCity
+  // Price recommendation fires only once media (photos or video) is uploaded
   useEffect(() => {
     const mrp = parseInt(mrpPrice);
-    const asking = parseInt(askingPrice);
-    if (!mrp || mrp <= 0 || !asking || asking <= 0 || !category) {
+    const hasMedia = photos.length > 0 || !!video;
+    if (!mrp || mrp <= 0 || !category || !hasMedia) {
       setPriceRec(null);
       return;
     }
@@ -167,7 +167,7 @@ export default function SellPage() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [askingPrice, mrpPrice, category, conditionNote, hubCity]);
+  }, [mrpPrice, category, conditionNote, hubCity, photos.length, video]);
 
   async function handleRequestReview() {
     if (!result?.item_id) return;
@@ -182,13 +182,28 @@ export default function SellPage() {
     }
   }
 
-  function handleVideoChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleVideoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 100 * 1024 * 1024) {
       setError("Video must be under 100 MB.");
+      e.target.value = "";
       return;
     }
+    const duration = await new Promise<number>((resolve) => {
+      const url = URL.createObjectURL(file);
+      const vid = document.createElement("video");
+      vid.preload = "metadata";
+      vid.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve(vid.duration); };
+      vid.onerror = () => { URL.revokeObjectURL(url); resolve(0); };
+      vid.src = url;
+    });
+    if (duration > 60) {
+      setError("Video must be 60 seconds or shorter.");
+      e.target.value = "";
+      return;
+    }
+    setError(null);
     setVideo(file);
     setVideoPreview(URL.createObjectURL(file));
   }
@@ -196,11 +211,11 @@ export default function SellPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (photos.length === 0 && !video) {
-      setError("Please upload at least one photo or a video.");
+      setError("Please upload at least one photo (up to 5) or a video before submitting.");
       return;
     }
     if (!category || !askingPrice) {
-      setError("Please fill in all required fields.");
+      setError("Please fill in all required fields (category and asking price).");
       return;
     }
 
@@ -427,15 +442,23 @@ export default function SellPage() {
                 </div>
               </div>
 
-              {/* Asking price with live AI recommendation */}
+              {/* Asking price — rough estimate; AI rec unlocks after media upload */}
               <div style={{ marginTop: "14px" }}>
                 <label style={labelStyle}>Your asking price (₹) *</label>
+
+                {/* Hint when no media yet */}
+                {photos.length === 0 && !video && (
+                  <div style={{ fontSize: "12px", color: "#888", marginBottom: "6px" }}>
+                    Enter a rough estimate — upload photos or a video below to get an AI price recommendation.
+                  </div>
+                )}
+
                 <div style={{ position: "relative" }}>
                   <input
                     type="number"
                     value={askingPrice}
                     onChange={(e) => setAskingPrice(e.target.value)}
-                    placeholder="e.g. 2200"
+                    placeholder={priceRec ? `e.g. ₹${priceRec.recommended_price.toLocaleString("en-IN")}` : "e.g. 2200"}
                     min="1"
                     required
                     style={{
@@ -452,8 +475,43 @@ export default function SellPage() {
                   )}
                 </div>
 
-                {/* Price warning banner */}
-                {priceWarning && (
+                {/* AI recommended price card — shown only after media uploaded */}
+                {(photos.length > 0 || !!video) && priceRec && !priceRecLoading && (
+                  <div style={{
+                    marginTop: "8px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    backgroundColor: "#f0f4f8",
+                    border: "1px solid #d0d9e8",
+                    fontSize: "13px",
+                  }}>
+                    <span style={{ color: "#555" }}>AI recommends:</span>
+                    <span style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "14px" }}>
+                      ₹{priceRec.recommended_price.toLocaleString("en-IN")}
+                    </span>
+                    <span style={{ fontSize: "11px", color: "#888" }}>
+                      Grade {CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade ?? "B"} × demand {priceRec.demand_factor}
+                    </span>
+                  </div>
+                )}
+
+                {(photos.length > 0 || !!video) && priceRecLoading && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#888", marginTop: "6px" }}>
+                    <Spinner size={12} color="#888" /> Calculating AI price recommendation…
+                  </div>
+                )}
+
+                {(photos.length > 0 || !!video) && !priceRec && !priceRecLoading && !mrpPrice && (
+                  <div style={{ fontSize: "12px", color: "#888", marginTop: "6px" }}>
+                    Enter Original MRP above to get AI price recommendation.
+                  </div>
+                )}
+
+                {/* Traffic light banner — only meaningful once rec is loaded */}
+                {priceWarning && (photos.length > 0 || !!video) && (
                   <div
                     style={{
                       marginTop: "6px",
@@ -472,29 +530,23 @@ export default function SellPage() {
                     {priceWarning.text}
                   </div>
                 )}
-
-                {/* XAI breakdown */}
-                {priceRec && !priceRecLoading && (
-                  <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>
-                    AI estimate: Grade {CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade ?? "B"} × demand factor {priceRec.demand_factor} → ₹{priceRec.recommended_price.toLocaleString("en-IN")} recommended
-                  </div>
-                )}
-
-                {!mrpPrice && askingPrice && (
-                  <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>
-                    Enter original MRP above to get AI price recommendation.
-                  </div>
-                )}
               </div>
 
-              {/* Photo upload + previews */}
+              {/* Photos or Video — at least one required */}
               <div style={{ marginTop: "16px" }}>
-                <label style={labelStyle}>Photos (min 1, max 5) *</label>
+                <label style={labelStyle}>
+                  Photos or Video *
+                  <span style={{ color: "#888", fontWeight: "normal", marginLeft: "6px", fontSize: "12px" }}>
+                    — upload 1–5 photos OR a short video (max 60s / 100 MB)
+                  </span>
+                </label>
+
+                {/* Photo dropzone */}
                 <div
                   style={{
                     border: "2px dashed #ddd",
                     borderRadius: "6px",
-                    padding: "20px",
+                    padding: "18px",
                     textAlign: "center",
                     cursor: "pointer",
                     backgroundColor: "#fafafa",
@@ -509,20 +561,23 @@ export default function SellPage() {
                     style={{ display: "none" }}
                     onChange={(e) => {
                       if (e.target.files) {
-                        setPhotos(Array.from(e.target.files).slice(0, 5));
+                        const all = Array.from(e.target.files);
+                        if (all.length > 5) {
+                          setError("Maximum 5 photos allowed — only the first 5 will be kept.");
+                        }
+                        setPhotos(all.slice(0, 5));
                       }
                     }}
                   />
                   {photos.length === 0 ? (
-                    <span style={{ color: "#888", fontSize: "14px" }}>
-                      Click to browse (up to 5 photos — used for AI grading)
-                    </span>
+                    <span style={{ color: "#888", fontSize: "14px" }}>Click to browse photos (up to 5)</span>
                   ) : (
                     <span style={{ color: "#2d6a4f", fontSize: "14px", fontWeight: "bold" }}>
                       {photos.length} photo{photos.length > 1 ? "s" : ""} selected — click to change
                     </span>
                   )}
                 </div>
+
                 {/* Photo previews */}
                 {previewUrls.length > 0 && (
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
@@ -551,30 +606,43 @@ export default function SellPage() {
                     ))}
                   </div>
                 )}
-              </div>
 
-              {/* Video inspection (optional) */}
-              <div style={{ marginTop: "16px" }}>
-                <label style={labelStyle}>
-                  Inspection Video{" "}
-                  <span style={{ color: "#888", fontWeight: "normal" }}>(optional, max 60s / 100 MB — overrides photo grading)</span>
-                </label>
-                <input
-                  type="file"
-                  accept="video/mp4,video/quicktime"
-                  onChange={handleVideoChange}
-                  style={{ display: "block", fontSize: "13px", color: "#555" }}
-                />
-                {videoPreview && (
-                  <video
-                    src={videoPreview}
-                    controls
-                    style={{ marginTop: "8px", height: "128px", borderRadius: "4px", border: "1px solid #ddd", display: "block" }}
+                {/* Divider */}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "12px 0" }}>
+                  <hr style={{ flex: 1, border: "none", borderTop: "1px solid #eee" }} />
+                  <span style={{ fontSize: "12px", color: "#aaa", fontStyle: "italic" }}>or</span>
+                  <hr style={{ flex: 1, border: "none", borderTop: "1px solid #eee" }} />
+                </div>
+
+                {/* Video upload */}
+                <div>
+                  <div style={{ fontSize: "12px", color: "#555", marginBottom: "5px", fontWeight: "500" }}>
+                    Video (max 60s / 100 MB):
+                  </div>
+                  <input
+                    type="file"
+                    accept="video/mp4,video/quicktime"
+                    onChange={handleVideoChange}
+                    style={{ display: "block", fontSize: "13px", color: "#555" }}
                   />
-                )}
-                {video && (
-                  <div style={{ fontSize: "12px", color: "#2d6a4f", marginTop: "4px" }}>
-                    {video.name} selected
+                  {videoPreview && (
+                    <video
+                      src={videoPreview}
+                      controls
+                      style={{ marginTop: "8px", height: "128px", borderRadius: "4px", border: "1px solid #ddd", display: "block" }}
+                    />
+                  )}
+                  {video && (
+                    <div style={{ fontSize: "12px", color: "#2d6a4f", marginTop: "4px" }}>
+                      {video.name} selected
+                    </div>
+                  )}
+                </div>
+
+                {/* Required hint */}
+                {photos.length === 0 && !video && (
+                  <div style={{ fontSize: "12px", color: "#888", marginTop: "8px" }}>
+                    At least one photo or a video is required before submitting.
                   </div>
                 )}
               </div>
