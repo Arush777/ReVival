@@ -276,10 +276,17 @@ def _query_items_for_buyer(buyer: dict) -> list[dict]:
     return items[:50]
 
 
-def get_recommendations(buyer_id: str, limit: int = 10) -> list[dict]:
+_LISTING_GRADE_FACTORS: dict[str, float] = {"A": 0.70, "B": 0.55, "C": 0.40, "D": 0.20}
+
+
+def get_recommendations(
+    buyer_id: str,
+    limit: int = 10,
+    cart_item_ids: list[str] | None = None,
+) -> list[dict]:
     """
     Inverted matching: given a buyer, find and rank listed items.
-    Cache key uses buyer_id + sorted candidate item_ids.
+    Cache key includes buyer_id, sorted candidate item_ids, and cart state.
     """
     buyer = get_item("Buyers", {"buyer_id": buyer_id})
     if not buyer:
@@ -290,22 +297,33 @@ def get_recommendations(buyer_id: str, limit: int = 10) -> list[dict]:
         return []
 
     sorted_item_ids_str = json.dumps(sorted(i["item_id"] for i in candidates))
+    cart_key_str = json.dumps(sorted(cart_item_ids or []))
     cache_key = make_cache_key(
         "recommendations",
         buyer_id.encode(),
         sorted_item_ids_str,
-        "v1",
+        cart_key_str,
+        "v2",
         MODEL_ID,
     )
     cached = cache_get(cache_key)
     if cached:
         return cached
 
+    # Build cart category set for complementary-item boosting
+    cart_categories: set[str] = set()
+    if cart_item_ids:
+        for cid in cart_item_ids:
+            cart_item = get_item("Items", {"item_id": cid})
+            if cart_item:
+                cart_categories.add(cart_item.get("category", ""))
+
     user_msg = (
         "Buyer profile:\n"
         f"- Preferences: {buyer.get('preferences', [])}\n"
         f"- Return history: {buyer.get('return_history', [])}\n"
-        f"- Recent reviews: {buyer.get('recent_reviews', [])}\n\n"
+        f"- Recent reviews: {buyer.get('recent_reviews', [])}\n"
+        f"- Purchase history brands: {[p.get('brand') for p in buyer.get('purchase_history', [])]}\n\n"
         "Items to score:\n"
         + json.dumps(
             [
@@ -327,7 +345,6 @@ def get_recommendations(buyer_id: str, limit: int = 10) -> list[dict]:
 
     llm_out = _call_bedrock(_RECOM_SYSTEM, user_msg)
     signal_by_item = {r["item_id"]: r for r in llm_out.get("rankings", [])}
-    item_map = {i["item_id"]: i for i in candidates}
 
     scored = []
     for item in candidates:
@@ -349,6 +366,7 @@ def get_recommendations(buyer_id: str, limit: int = 10) -> list[dict]:
         price = buyer_price(buyer, base_price, item)
 
         credits_data = compute_credits(item, grading, dist_km)
+        grade = item.get("grade", "B")
 
         scored.append({
             **item,
@@ -358,12 +376,24 @@ def get_recommendations(buyer_id: str, limit: int = 10) -> list[dict]:
             "co2_saved_kg": credits_data["co2_saved_kg"],
             "credits": credits_data["credits"],
             "why_this_fits": signal.get("rationale", ""),
+            # XAI fields threaded through for frontend transparency
+            "xai_reason_neutralized": signal.get("reason_neutralized", "none"),
+            "xai_reason_recurrence": signal.get("reason_recurrence", "none"),
+            "xai_grade_factor": _LISTING_GRADE_FACTORS.get(grade.upper(), 0.40),
+            "xai_defects": item.get("defects", []),
+            "xai_grading_notes": item.get("history_note", ""),
         })
 
     # eco boost
     for s in scored:
         eco_boost = min(0.05, buyer.get("credit_score", 0) / 10000)
         s["re_return_risk"] = max(0, round(s["re_return_risk"] - eco_boost, 4))
+
+    # cart complement boost: items in same category as cart get mild priority
+    if cart_categories:
+        for s in scored:
+            if s.get("category", "") in cart_categories:
+                s["re_return_risk"] = max(0, round(s["re_return_risk"] - 0.03, 4))
 
     ranked = sorted(scored, key=lambda i: (i["re_return_risk"], i["item_id"]))[:limit]
     cache_put(cache_key, "recommendations", ranked)

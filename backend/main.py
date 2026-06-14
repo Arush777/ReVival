@@ -313,8 +313,9 @@ async def get_buyer(buyer_id: str):
 
 
 @app.get("/buyers/{buyer_id}/recommendations")
-async def get_buyer_recommendations(buyer_id: str, limit: int = 10):
+async def get_buyer_recommendations(buyer_id: str, limit: int = 10, cart: str = ""):
     limit = min(limit, 25)
+    cart_item_ids = [c.strip() for c in cart.split(",") if c.strip()] if cart else []
 
     if _DEMO_MODE:
         buyer = get_item("Buyers", {"buyer_id": buyer_id})
@@ -341,8 +342,9 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10):
         candidates = candidates[:50]
 
         sorted_ids = json.dumps(sorted(i["item_id"] for i in candidates))
+        cart_key_str = json.dumps(sorted(cart_item_ids))
         cache_key = make_cache_key(
-            "recommendations", buyer_id.encode(), sorted_ids, "v1",
+            "recommendations", buyer_id.encode(), sorted_ids, cart_key_str, "v2",
             os.environ["BEDROCK_TEXT_MODEL_ID"],
         )
         if not cache_get(cache_key):
@@ -355,7 +357,7 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10):
                 }},
             )
 
-    items = _get_recommendations(buyer_id, limit)
+    items = _get_recommendations(buyer_id, limit, cart_item_ids=cart_item_ids or None)
     # Remove items the buyer themselves listed for sale
     items = [i for i in items if i.get("seller_id") != buyer_id]
     enriched = []
@@ -381,6 +383,13 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10):
             "credits": item.get("credits", 0),
             "re_return_risk": item.get("re_return_risk", 0.0),
             "why_this_fits": item.get("why_this_fits", ""),
+            "distance_km": item.get("distance_km", 0),
+            # XAI transparency fields
+            "xai_reason_neutralized": item.get("xai_reason_neutralized", "none"),
+            "xai_reason_recurrence": item.get("xai_reason_recurrence", "none"),
+            "xai_grade_factor": item.get("xai_grade_factor", 0.0),
+            "xai_defects": item.get("xai_defects", []),
+            "xai_grading_notes": item.get("xai_grading_notes", ""),
         })
     return {"buyer_id": buyer_id, "items": enriched}
 
