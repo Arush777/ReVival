@@ -1,244 +1,522 @@
-# Second Life Commerce — Full Context & Reasoning
-> This is the "why" document. Read this to understand every decision. The action_plan.md is the "what to build." This explains the thinking behind it.
+# Amazon Second Life — AI-Powered Circular Commerce
+
+An end-to-end system for routing returned products back into the market instead of landfill. When a seller returns or re-lists an item, an agent pipeline grades it, prices it, matches it to the buyer least likely to return it again, generates a verified condition report, and closes the listing prevention loop on the original product page.
 
 ---
 
-## What We're Building
+## Table of Contents
 
-An **AI-powered circular commerce ecosystem** for Amazon. When a product is returned, instead of sitting in a warehouse or going to landfill, it automatically:
-1. Gets graded by AI vision
-2. Gets matched to the one buyer who will never return it again
-3. Gets priced cheaper for buyers near the return hub (faster clearance, less shipping)
-4. Gets a verified condition report (Trust Passport) that makes buyers trust second-hand
-5. Corrects the listing error that caused the return — so the next buyer never has to return it
-
-The PS phrase that defines the entire system: **"find its next best owner."** This is a matching problem, not a storage problem. Most teams build a refurb catalog. We build a re-homing engine.
-
----
-
-## Why This Problem Statement
-
-We chose Second Life Commerce over the other three themes (Smart Home, Amazon Now, CampusFlow) for four reasons:
-
-**1. Global disruption with real numbers.** Returns cost Amazon billions annually. Every return has three victims: the customer (hassle), the seller (lost revenue), and the planet (waste + reverse logistics CO₂). A solution here has measurable impact that can be quantified in the demo.
-
-**2. Demo-ability in 48 hours.** AI quality-grading from a photo is visually compelling — a judge watching a video instantly understands what just happened. There's no better demo moment in any of the four themes.
-
-**3. Uniquely Amazon.** Only Amazon has the buyer purchase history, fulfillment network, and brand trust to build this. A startup can't copy it. Back Market has the catalog. eBay has the marketplace. Only Amazon has all three. This "moat" argument scores well under business relevance.
-
-**4. The PS explicitly asks for all our features.** Exchange, P2P resale, quality grading, green credits, prevention, personalized recommendations — each bullet in the PS maps to a specific agent we've built. Judges cross-reference against the PS.
+1. [What It Does](#what-it-does)
+2. [Architecture](#architecture)
+3. [Quick Start](#quick-start)
+4. [Environment Variables](#environment-variables)
+5. [Backend — API Reference](#backend--api-reference)
+6. [Agents](#agents)
+7. [Database Schema](#database-schema)
+8. [Frontend — Pages & Components](#frontend--pages--components)
+9. [Seed Data](#seed-data)
+10. [Feature Details](#feature-details)
+11. [Project Structure](#project-structure)
 
 ---
 
-## The Three Pillars + What We Added Back
+## What It Does
 
-### Original scope (3 pillars)
-1. **Triage** — grade the item, route it (resell/refurb/donate/recycle)
-2. **Prevent** — catch the listing error, warn future buyers
-3. **Liquidate locally** — geo-aware pricing for faster clearance
+```
+Seller uploads return (photos / video)
+        │
+        ▼
+ [Grading Agent]      AI vision → A/B/C/D/REVIEW + defects + size/colour mismatch
+        │
+        ▼
+ [Disposition Agent]  resell / refurbish / donate / recycle / exchange / manual_review
+        │
+        ▼
+ [Pricing Agent]      base_price = 90% × recovered_value
+        │
+        ▼
+ [BuyerInterestIndex] DynamoDB: 50 candidate buyers by category + region
+        │
+        ▼
+ [Matching Agent]     LLM reranks by return-reason neutralisation + recurrence risk
+        │
+        ▼
+ [Green Credits]      CO₂ saved (manufacturing + shipping) → credits
+        │
+        ▼
+ [Passport Agent]     LLM writes honest condition report → S3 HTML + Item record
+        │
+        ▼
+ [Prevention Agent]   Correct listing attributes; write ListingFlags for PDP widget
+        │
+        ▼
+ Items.status = "listed" → appears in buyer recommendation feeds
+```
 
-### What we reinstated and why
-
-**Exchange → "Trade-In Credit"**
-The PS explicitly lists "exchange" as a route. We originally dropped it for encouraging churn. The fix is framing: instead of cash refund → the system issues store credit that can only be redeemed on second-life items. Money stays in the ecosystem. Item gets re-routed through the same grading pipeline. This is ~20 extra lines in the disposition engine.
-
-**P2P Resale → "Community Listing"**
-The PS explicitly asks for "easy peer-to-peer resale inside Amazon's trusted ecosystem." The insight: we don't build a new marketplace. We give P2P sellers access to the **same grading pipeline and Trust Passport**. The grading agent IS the trust mechanism. A community-listed item gets graded, gets a Trust Passport, and appears in the recommendation feed. Seller keeps the item and ships directly. Zero new infra.
-
-**Prevention — Split into Two Mechanisms**
-Original was vague. Now it's two distinct, well-scoped things:
-- **Supply-side:** when an item is re-listed after grading, its listing attributes are auto-corrected (listed_size becomes detected_size). The wrong information can never re-enter the system.
-- **Demand-side:** a PDP widget on the *original* product page reads from `ListingFlags` and shows "23 buyers found this runs small." This is the "predictive return prevention before a purchase is even made" bullet in the PS. It's pure code — no AI — just a count query.
-
----
-
-## The Agentic Architecture — Why This Structure
-
-We designed a **fleet of specialized agents** rather than one monolithic AI call because:
-
-1. **Each agent has a clear, narrow job** — this maps to the "agent" metaphor cleanly and judges respond well to it architecturally.
-2. **Most agents are pure code** — of 7 agents, only 3 call an LLM. The other 4 are deterministic rules. This means "7 agents" doesn't mean 7× cost.
-3. **LLM does what code can't** — the LLM's job is interpreting product-specific evidence from images and messy natural language ("too tight," "colors off") into structured signals. Code owns normalization, validation, routing, pricing, caching, and auditability. This separation is the key to consistency.
-
-### Why Sonnet for grading, Haiku for text
-
-Grading involves **image analysis** — the quality of vision interpretation directly affects the demo's money-shot (the grade + mismatch detection). Sonnet 4.6 has meaningfully better vision than Haiku. The cost difference is ~$0.01 per grading call — irrelevant at demo scale.
-
-Matching and passport generation are **text reasoning tasks** — Haiku 4.5 handles these well at $0.002 per call.
-
-Never use Opus for any of these. It's 5× more expensive than Sonnet and does not accept `temperature: 0` (returns API error), which breaks our consistency strategy.
-
-### How grading stays product-general but stable
-
-The first version of grading should not hardcode "wear level <= 4 means Grade B." That looks deterministic, but it is arbitrary because a scuff on a shoe, an opened food packet, a missing phone charger, and a stained saree do not mean the same thing. The LLM should assign the condition grade using a universal resale rubric: A new-like, B light wear, C usable but visibly worn/minor repair, D not resellable, and REVIEW when evidence is weak.
-
-The deterministic layer wraps around the LLM:
-- Canonicalize images before grading: stable order, EXIF orientation, RGB JPEG, fixed size, fixed quality.
-- Send stable metadata only: category, brand, product name/title, listed attributes, return reason, and history note.
-- Force enum JSON output: no floating scores, no prose-only answers, no invented fields.
-- Let code apply only objective blockers: non-functional, safety/hygiene issue, low confidence, or missing evidence goes to D or REVIEW.
-- Cache by content hash: same canonical photos + same metadata + same rubric + same prompt + same model = same stored result.
-
-That means grading is not "hardcoded for Nike shoes." It works for any product category the demo throws at it, while the filmed demo remains stable because all seed items are pre-graded in `GradeCache`.
+The same pipeline runs for **community P2P listings** — a seller-listed item passes through identical grading, passport generation, and recommendation routing.
 
 ---
 
-## The Matching Algorithm — Deeper Explanation
+## Architecture
 
-### Why re-return risk, not "item similarity"
+### Backend
 
-A conventional recommendation engine matches on item attributes: "you bought Nike, here's more Nike." That's not good enough here. We want the buyer least likely to return the item again — which requires reasoning about *why the last person returned it* and whether this buyer has the opposite trait.
+- **FastAPI** + **boto3** on Python 3.12
+- **7 agents** — 3 call AWS Bedrock (vision grading, LLM matching, LLM passport); 4 are pure deterministic code
+- **AWS Bedrock** for AI calls — vision model for grading (Qwen 3 VL 235B / Claude Sonnet 4.6), text model for matching + passport (Mistral Large 3 / Claude Haiku 4.5)
+- **DynamoDB** — 6 tables (Items, Buyers, BuyerInterestIndex, ListingFlags, CreditsLedger, GradeCache)
+- **S3** — 2 buckets (photos, passports)
+- **Deterministic caching** — every Bedrock call is cached by SHA-256 of canonical inputs; same input always returns same grade, zero inference cost on repeat calls or demo runs
 
-This is why the return reason code is a **first-class signal**, not metadata. "Runs small" returned by person A is a perfect match for person B who sizes up — the very reason it was returned is the reason someone else will love it.
+### Frontend
 
-### Why two stages
-
-Stage 1 is a cheap DynamoDB query that filters 30 million buyers → ~50 candidates using hard attributes (region, category, size compatibility). Stage 2 is the expensive LLM call that soft-ranks those 50. This pattern (retrieve-then-rerank) is standard in production recommendation systems and is exactly the right answer when a judge asks "how does this scale to millions of users?"
-
-### Why discretized signals (not 0–1 floats from the LLM)
-
-If you ask an LLM "rate this from 0 to 1," you might get 0.73 one time and 0.69 another for identical input. A different response each time = different ranking = inconsistent demo. If you ask for "none / partial / strong," the model collapses its uncertainty into 3 buckets. A tiny wobble in the model's internal confidence stays in the same bucket, maps to the same float (0.0 / 0.5 / 1.0), and produces the same score. Consistent output from controlled input.
-
-### The eco-loyalty boost (Tier 1 green credits)
-
-Buyers with high `credit_score` (accumulated from eco-friendly behavior) get a tiny risk reduction (max 0.05). This means if two buyers have similar risk scores, the eco-loyal buyer gets offered the item first. This creates a behavioral loop: buying second-life → earn credits → get priority access → more likely to buy second-life again. Cost to Amazon: $0. This is the "Tier 1 Priority Access" green credit feature.
+- **Next.js** + **TypeScript**, Amazon-style UI
+- 12 pages, 9 components
+- LocalStorage cart with cross-tab sync via custom event emitter
+- Grade-preview flow: uploads media → backend AI grades → recommended price appears with green/yellow/red traffic-light indicator
 
 ---
 
-## Green Credits — Why This Design
+## Quick Start
 
-Most hackathon teams will implement a points system with arbitrary numbers: "buy refurb, get 50 points." Judges will ask "why 50?" and there's no answer.
+### Prerequisites
 
-Our credits are grounded in **actual CO₂e avoided**, computed from a carbon lifecycle table. The formula:
-- Manufacturing CO₂e saved (buying refurb instead of new) — the big number
-- Shipping CO₂e saved (local sale vs national average shipping)
+- Python 3.12+, Node.js 18+
+- AWS account with Bedrock access (ap-south-1)
+- `ffmpeg` installed (required for video grading; photo-only flows work without it)
+- AWS profile configured (`secondlife-local-dev` or set `AWS_PROFILE`)
 
-The specific numbers come from public lifecycle analysis data (shoes: ~14 kg CO₂e to manufacture, ~0.8 kg weight, 0.1g CO₂ per km per kg for shipping). You can cite these if asked.
+### Backend
 
-### The three redemption tiers and why each exists
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp ../.env.example ../.env   # fill in your values
+python seed/seed.py          # create tables, upload photos, pre-warm cache
+uvicorn main:app --reload --port 8000
+```
 
-**Tier 1 — Priority Access (affects matching algorithm):** Zero cost to Amazon. Creates the behavioral loop described above. The key insight is that credits become a product *signal*, not just a user score.
+### Frontend
 
-**Tier 2 — Second-life discount:** A direct financial incentive to stay in the circular economy. The discount only applies to refurbished items — not new. This is enforced in the frontend at redemption time.
-
-**Tier 3 — NGO donation:** The emotionally resonant moment. "Your 200 credits funded a tree planting." This is what users screenshot and share. The shareable moment on the order confirmation screen maps to this tier.
-
-**Green provenance as a ranking signal:** Between two similar second-life items, the one routed locally (shorter shipping, less CO₂) ranks higher in the recommendation feed. Credits become a quality dimension of the product, not just a user reward.
-
----
-
-## Prevention — The Closed Loop
-
-This is the system's most elegant feature and should be narrated clearly in the demo:
-
-> A return comes in → AI detects the listing error (wrong size, wrong color) → fixes the listing going forward → writes a count to ListingFlags → future buyers see the warning on the PDP → fewer returns.
-
-The loop: **returns fund prevention.** Every return that goes through the system makes the catalog more accurate. At Amazon's scale (hundreds of millions of listings), even a 1% improvement in listing accuracy is enormous — this is the Future Vision slide's opening line.
-
-The two mechanisms are deliberately separate:
-- **Supply-side:** ensures the returned item itself can't be re-listed wrong.
-- **Demand-side:** ensures the original listing gets a warning. These are different items (one is the physical return, one is the new inventory on the shelf).
+```bash
+cd frontend
+npm install
+# create frontend/.env.local:
+# NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+# NEXT_PUBLIC_DEMO_BUYER_ID=BUY-001
+npm run dev    # http://localhost:3000
+```
 
 ---
 
-## The Buyer-Side Recommendation Feed — The Key UX Shift
+## Environment Variables
 
-We changed from item-centric (assign an item to its best owner) to buyer-centric (show a buyer their best second-life options). Both use the exact same matching engine — it's just the direction of the query that changes.
+Copy `.env` to the project root and fill in:
 
-**Why buyer-centric is better for the demo:**
-- Judges immediately recognize the "Amazon recommended for you" experience
-- The "Why this fits you" card line surfaces the matching intelligence visually — most rec engines are opaque, ours explains itself
-- The Trust Passport is reached from a recommendation card — much more natural than from an ops dashboard
+```ini
+APP_ENV=local
+DEMO_MODE=true                              # bypass some live Bedrock calls for demo speed
 
-**The item-centric direction isn't dropped** — it's retained as a background job for high-value or perishable items that need to be moved quickly. The system proactively notifies the single best-matched buyer. This is the "right person for a ₹40,000 phone" use case.
+AWS_DEFAULT_REGION=ap-south-1
+AWS_PROFILE=secondlife-local-dev
 
----
+# Bedrock model IDs
+BEDROCK_REGION=ap-south-1
+BEDROCK_VISION_MODEL_ID=qwen.qwen3-vl-235b-a22b
+# or: anthropic.claude-sonnet-4-6
+BEDROCK_TEXT_MODEL_ID=mistral.mistral-large-3-675b-instruct
+# or: anthropic.claude-haiku-4-5-20251001-v1:0
 
-## Data Layer Design Decisions
+# DynamoDB (tables are prefixed, e.g. SecondLifeItems)
+DDB_TABLE_PREFIX=SecondLife
 
-### Why DynamoDB (not Postgres, not MongoDB)
+# S3 (must exist in your account)
+S3_PHOTOS_BUCKET=secondlife-photos-478982785786
+S3_PASSPORTS_BUCKET=secondlife-passports-478982785786
 
-DynamoDB is the natural choice for this AWS-native demo. More importantly, it's **NoSQL/document-style** — our buyer profiles have nested arrays (return_history, preferences) and maps (size_profile) that would require 3+ joined tables in SQL. In DynamoDB it's a single record.
+# CORS (comma-separated)
+CORS_ORIGINS=http://localhost:3000
+```
 
-The scalable matching path is a materialized `BuyerInterestIndex`: one row per buyer interest category, keyed by `category` and `region#buyer_id`. DynamoDB cannot query array elements inside `category_interests`, so this index is what lets Stage 1 retrieve category-compatible buyers without scanning the Buyers table. The Items table also has a `StatusCategoryIndex` so buyer recommendation feeds query listed items by category instead of scanning inventory.
+Frontend (`frontend/.env.local`):
 
-### Why seed JSON in repo (not a real RAG vector store)
-
-The reference data (size maps, carbon tables, demand tables) is:
-- Read-only (it never changes during the demo)
-- Tiny (30-50 rows each)
-- Looked up by exact key (no fuzzy search needed)
-
-A real RAG/vector store is the production path (Bedrock Knowledge Base + OpenSearch). For the demo, loading a JSON file at startup is functionally identical and eliminates a complex dependency. The architecture diagram shows the production version — we present the full Bedrock Agent + KB setup there.
-
-### Why content-hash caching is mandatory
-
-An LLM is not bit-for-bit deterministic even at temperature 0. Running the same grading call twice can produce slightly different output. On camera, this is catastrophic — the grade might change. The content-hash cache (`GradeCache` table) provides the only **hard guarantee**: same canonical images + same metadata + same rubric + same prompt version + same model = same result, always, because we never call the model for the same input twice.
-
-The cache also pre-bakes the demo: running the seed script once populates all 15 items' grades, matches, and passports into the cache. The filmed demo reads cached results — instant, $0, zero on-camera risk.
-
----
-
-## India-Specific Context
-
-This is a hackathon for Indian students judged by Amazon India. The solution should feel rooted in the Indian market:
-
-**Sizing:** Indian sizing is different from US/UK/EU. A US10 shoe is India 9. A shirt labeled "L" by an international brand may fit like "M" by Indian standards. Our size_standard_map.json explicitly handles this. The hero demo item (Nike Air Max 270) returns because of exactly this mismatch — this is a very real pain point for Indian shoppers.
-
-**Cities:** All hub cities, buyer cities, and demand tables use Indian metros (Bangalore, Mumbai, Delhi, Surat, Ahmedabad, Chennai, Pune, Hyderabad). The geo-pricing story (item returned in Bangalore → priced cheaper for Surat buyer 440 km away vs Delhi buyer 2100 km away) is concrete and believable.
-
-**Categories:** Include kurta, saree, regional food products (Rajasthani pickle, MTR chilli powder) alongside global brands. This makes the dataset feel real.
-
-**Return behavior:** Indian e-commerce has a high return rate for apparel (size/color mismatch is the #1 reason) and electronics (changed mind is common due to EMI purchase behavior). The 15 hero items reflect this.
+```ini
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_DEMO_BUYER_ID=BUY-001
+```
 
 ---
 
-## Six-Month Vision
+## Backend — API Reference
 
-**0–3 months:** Current MVP — grading, matching, Trust Passport, geo-pricing, prevention widget, green credits. India launch, top 10 categories.
+### Health & Config
 
-**3–6 months:**
-- **Seller Central prevention loop:** Return cost breakdown per listing with an AI-generated "accuracy improvement prompt" — "Your Nike Air Max listing has 7.3% returns for size mismatch. Updating to show Indian sizing would reduce returns by ~40%." This is the B2B version of prevention.
-- **Expanded Trust Passport:** video inspection option (seller-uploaded unboxing video for high-value items).
-- **Green credits marketplace:** third-party redemption (Zepto grocery discount, IRCTC carbon offset, Zomato eco-friendly delivery).
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | `{ok, service, env, aws_region}` |
+| `GET` | `/config` | API base URL + demo IDs |
 
-**6–12 months:**
-- **Learning loop:** matching outcomes (did the matched buyer keep the item?) feed back as labels to improve the re-return risk formula over time. The system gets smarter with every matched item.
-- **Cross-category routing:** a returned camera that can't be resold in India gets routed to an NGO that trains rural photographers. The disposition engine connects to a real NGO needs feed.
-- **Multi-segment expansion:** the same grading + matching pipeline works for grocery (near-expiry routing), fashion (seasonal demand routing), and B2B (seller liquidation). Amazon's fulfillment data is the differentiator in every segment.
+### Supply-Side (Return / Sell Flow)
 
-**The one-line vision for the slide:**
-> *"Every return becomes a signal that makes the next purchase smarter — until returns are rare, refurb is trusted, and every product finds its highest-value next life, automatically."*
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/returns` | Process a return: `multipart/form-data` with `payload` (JSON), optional `photos[]`, optional `video`. Runs full agent pipeline. Returns `{item_id, status, grade, disposition, base_price_inr, co2_saved_kg, credits, trade_in_credit_inr, top_matches, warning_written}` |
+| `POST` | `/community-list` | P2P seller listing: same form-data shape as `/returns`. On success returns the full item result; on D/REVIEW returns `{status, grade, recommended_price_inr, grade_factor, demand_factor}` |
+| `POST` | `/grade-preview` | Pre-submission AI grade: `category`, `condition` (form fields) + `photos[]` or `video`. Returns `{grade, confidence, wear_level, evidence[]}`. Used by the sell page to show a price recommendation before final submit. Returns HTTP 422 if ffmpeg is missing and only a video was provided |
+| `GET` | `/listings/recommend-price` | `?original_price=&grade=&category=&region=` → `{recommended_price, grade_factor, demand_factor}` |
+| `GET` | `/listings/{listing_id}/warning` | Size/colour mismatch flag for a listing (PDP prevention widget) |
+
+### Demand-Side (Buyer / Browse Flow)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/buyers` | List buyers; filter by `?region=&category=` |
+| `GET` | `/buyers/{buyer_id}` | Full buyer record |
+| `GET` | `/buyers/{buyer_id}/orders` | Order history |
+| `GET` | `/buyers/{buyer_id}/recommendations` | Two-stage personalised feed with `?limit=&cart=` cart-aware ranking. Each item includes `re_return_risk`, `why_this_fits`, and all XAI transparency fields |
+| `GET` | `/search` | `?q=&category=&grade=` full-text search |
+| `GET` | `/search/suggestions` | `?q=` autocomplete |
+| `GET` | `/items/{item_id}` | Full item detail: photos, passport URL, 13 grading evidence fields, `_enrich_matches` with per-buyer 7-factor risk breakdown |
+| `GET` | `/items/{item_id}/passport` | Trust Passport text fields + presigned S3 HTML URL |
+| `POST` | `/items/{item_id}/request-review` | Flag item for human review |
+
+### Ops & Credits
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/ops/items` | Ops dashboard feed: `?status=&limit=`. Returns evidence, confidence_bucket, wear_level, rubric_version, grader_input_hash |
+| `POST` | `/credits/redeem` | Buyer redeems credits at checkout (max 20% of item price); writes CreditsLedger row |
+| `POST` | `/notify-seller` | Fire-and-forget seller notification stub |
 
 ---
 
-## Judging Criteria Map
+## Agents
 
-| Criterion | How we score it |
-|---|---|
-| **Innovativeness** | Return-reason-as-matching-signal is novel. No existing re-commerce platform does this. |
-| **Degree of disruption** | Affects millions of returns globally. Quantifiable ROI for Amazon (reduced return cost + recovered resale value + reduced returns via prevention). |
-| **Quality of presentation** | One item, full end-to-end in 60 seconds. Every screen maps to a PS bullet. |
-| **Quality of implementation** | Working prototype, real Bedrock calls, real DynamoDB/S3, pre-baked for flawless demo. |
-| **Scalability** | Two-stage matching (retrieve-then-rerank), DynamoDB GSI, event-driven SQS backbone in production diagram, stateless Lambda. |
-| **Futuristic vision** | Learning loop, Seller Central prevention, cross-category expansion, multi-segment. 6-month roadmap is specific and quantified. |
+### 1. Grading Agent (`agents/grading.py`)
+
+Runs AI vision on photos or video to assign a condition grade.
+
+**Model:** `BEDROCK_VISION_MODEL_ID` (Qwen 3 VL 235B or Claude Sonnet 4.6)
+
+**Grading rubric:**
+
+| Grade | Meaning |
+|-------|---------|
+| A | New-like / open-box — no meaningful wear |
+| B | Fully usable, light cosmetic wear, no repair needed |
+| C | Usable but visibly worn, needs cleaning / minor repair |
+| D | Not resellable: non-functional, unsafe, missing critical parts |
+| REVIEW | Insufficient or ambiguous evidence |
+
+**Deterministic guardrails applied after the LLM response:**
+- Low-confidence → REVIEW
+- Safety/hygiene blocker flagged → D
+- `functional_status = not_working` → D
+- Electronics with `functional_status = unknown` → REVIEW
+- Unsealed hygiene/food item → REVIEW
+
+**Outputs:** `grade`, `raw_llm_grade`, `grade_bucket`, `confidence_bucket`, `defects[]`, `wear_level`, `functional_status`, `detected_color`, `detected_size`, `size_mismatch`, `color_mismatch`, `mismatch_notes`, `evidence[]`, `rubric_version`, `grader_input_hash`
+
+**Determinism guarantee:** images are canonicalised (EXIF, RGB JPEG, max 1600px, q=85), combined with stable metadata, SHA-256 hashed, and looked up in GradeCache before any Bedrock call.
+
+**Three entry points:**
+- `grade_item(item, s3_keys)` — orchestrator path (downloads from S3)
+- `grade_item_from_paths(item, local_paths)` — `/grade-preview` path (local temp files, no S3 upload)
+- `grade_from_video(item, video_path)` — extracts 5 frames via ffmpeg, then calls image grading
 
 ---
 
-## The Pitch Line
+### 2. Disposition Agent (`agents/disposition.py`)
 
-> *"One AI engine that gives every returned item its best second life — grading it honestly, matching it to the one buyer who will never return it, pricing it to clear fast and green, and closing the loop so the same mistake never causes a return again."*
+Pure deterministic routing — no LLM.
+
+| Grade | Default route | High-value electronics |
+|-------|--------------|------------------------|
+| A | resell | resell |
+| B | resell | resell |
+| C | donate | refurbish |
+| D | recycle | recycle |
+| REVIEW | manual_review | manual_review |
+
+Trade-in flag upgrades A/B → exchange. Recovery value = `original_price × {A:0.70, B:0.55, C:0.35, D:0.05}`.
 
 ---
 
-## What Not to Build (Scope Discipline)
+### 3. Pricing Agent (`agents/pricing.py`)
 
-These belong in the Future Vision section only — never in the demo:
-- Real-time inventory tracking across fulfillment centers
-- Training a custom computer vision model (use Bedrock/Sonnet vision — it's better and instant)
-- A full P2P marketplace with payments, disputes, ratings
-- Live maps API integration (use haversine formula + city coords JSON)
-- Real NGO API integration
-- Actual review mining from Amazon's real review corpus
+Pure math — no LLM.
 
-The demo should show one item going through the full pipeline beautifully. Everything else is a roadmap story.
+**Seller-facing (listing price recommendation):**
+```
+recommended_price = original_price × grade_factor × demand_factor
+demand_factor ∈ [0.8, 1.1] mapped from demand_table signal ∈ [0.5, 0.95]
+```
+
+**Buyer-facing (dynamic geo-aware pricing):**
+```
+proximity_discount = min(0.25, 0.25 × (1 − distance_km / 1500))
+price = base_price × (1 − proximity_discount) × demand_factor
+```
+
+---
+
+### 4. Matching Agent (`agents/matching.py`)
+
+Two-stage matching to find the buyer least likely to return an item.
+
+**Stage 1 (deterministic):** Query `BuyerInterestIndex` → up to 50 candidates by category + region, ranked by distance.
+
+**Stage 2 (LLM):** Text model scores each candidate on two discrete signals:
+- `reason_neutralized` — does a buyer trait cancel the return reason? ("runs small" + "always sizes up" → `strong`)
+- `reason_recurrence` — has the buyer returned for this same reason before?
+
+**7-factor re-return risk score:**
+
+| Factor | Weight | Direction | Type |
+|--------|--------|-----------|------|
+| `buyer_return_rate` | 0.25 | risk ↑ | deterministic |
+| `size_incompatibility` | 0.30 | risk ↑ | deterministic |
+| `condition_intolerance` | 0.15 | risk ↑ | deterministic |
+| `brand_affinity` | 0.20 | benefit ↓ | deterministic |
+| `reason_recurrence` | 0.15 | risk ↑ | LLM-derived |
+| `reason_neutralization` | 0.35 | benefit ↓ | LLM-derived |
+| `eco_boost` | cap 0.05 | benefit ↓ | deterministic |
+
+Final score = sigmoid(6 × (raw − 0.5)) → normalised [0, 1]. Lower = safer buyer.
+
+The `risk_factors()` function returns the full per-factor breakdown (value, weight, direction, `llm_derived` bool) attached to every buyer match via `_enrich_matches()` — surfaced in the XAI panel on the listing page.
+
+---
+
+### 5. Green Credits Agent (`agents/green_credits.py`)
+
+Pure lifecycle maths — no LLM.
+
+```
+co2_manufacturing = carbon_table[category].manufacturing_kg_co2
+co2_shipping = max(0, 1200 − nearest_buyer_km) × item_weight_kg × 0.0001
+co2_saved_kg  = co2_manufacturing + co2_shipping
+credits        = round(co2_saved_kg × 10)
+```
+
+Redemption tiers:
+- **Tier 1 — Priority access:** eco_boost (max 0.05) applied to risk score for high-credit buyers
+- **Tier 2 — Discount:** up to 20% of item price at checkout
+- **Tier 3 — NGO donation:** tree-planting on order confirmation page
+
+---
+
+### 6. Trust Passport Agent (`agents/passport.py`)
+
+Generates an honest, human-readable condition report via LLM.
+
+**Model:** `BEDROCK_TEXT_MODEL_ID`
+
+**Four text fields:** `summary`, `condition_statement`, `why_returned`, `buyer_reassurance`
+
+Fields are written directly onto the Item DynamoDB record (`passport_summary`, `passport_condition`, `passport_why_returned`, `passport_reassurance`) at generation time. The `/items/{id}/passport` endpoint reads stored fields directly — avoids the SHA-256 reconstruction bug where `Decimal('2.0')` round-tripped from DynamoDB as `int(2)`, causing hash mismatch and `passport: null`. Cache reconstruction kept as fallback for legacy items.
+
+The rendered S3 HTML shows `Verified by: AI Vision Model · AWS Bedrock` (not the raw Bedrock model ID).
+
+---
+
+### 7. Prevention Agent (`agents/prevention.py`)
+
+Pure deterministic — no LLM.
+
+**Supply-side:** If grading detected a size/colour mismatch, update the Item record to the detected values. Wrong attributes cannot re-enter the catalog.
+
+**Demand-side:** Write a `ListingFlags` entry keyed by the original product's `listing_id`. The PDP widget shows: *"Runs small — 5 buyers found this."*
+
+---
+
+## Database Schema
+
+### DynamoDB Tables
+
+| Table | PK | SK | Purpose |
+|-------|----|----|---------|
+| `{prefix}Items` | `item_id` | — | All items post-grading. Stores all grading fields, photo_keys, passport fields, matches, credits |
+| `{prefix}Buyers` | `buyer_id` | — | Buyer profiles: region, return_rate, credit_score, size_profile, purchase/return history |
+| `{prefix}BuyerInterestIndex` | `category` | `region#buyer_id` | Stage-1 match index: fast scan of buyers per category+region |
+| `{prefix}ListingFlags` | `listing_id` | — | Mismatch flags for PDP prevention widget |
+| `{prefix}CreditsLedger` | `buyer_id` | `{timestamp}#{item_id}#{action}` | Append-only credits history |
+| `{prefix}GradeCache` | `cache_key` | — | SHA-256-keyed LLM output cache (grading, matching, passport) |
+
+### S3 Buckets
+
+| Bucket | Key pattern | Content |
+|--------|------------|---------|
+| `S3_PHOTOS_BUCKET` | `photos/{item_id}/{filename}` | Item photos |
+| `S3_PASSPORTS_BUCKET` | `passports/{item_id}.html` | Trust Passport HTML pages |
+
+---
+
+## Frontend — Pages & Components
+
+### Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Buyer homepage: banner carousel, hero recommendation grid, green corner, trending nearby |
+| `/sell` | P2P seller flow: item details → rough asking price → media upload → AI grade-preview → traffic-light price rec → submit |
+| `/return` | Retailer return flow: return reasons, replacement options, trade-in toggle, media upload |
+| `/refurb/[id]` | Refurbished item detail: photo carousel, 📹 video-analysis badge, grade badge, price (save-X% guarded), Trust Passport, AI Grading Evidence panel, buyer match cards with risk breakdown |
+| `/product/[id]` | Original catalog PDP with prevention widget |
+| `/search` | Search with autocomplete suggestions |
+| `/cart` | Cart: items, CO₂ total, credits, checkout |
+| `/exchange` | Trade-in credit calculator |
+| `/order-confirm` | Post-purchase: CO₂ impact, credits awarded, NGO donation option |
+| `/ops` | Ops dashboard: item table, status filter, AI grading evidence, confidence badge, audit trail, HITL human review |
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| `AmazonHeader` | Navigation bar with cart count and buyer points badge |
+| `RecommendationCard` | Item card with grade badge, XAI "why this fits" inline expand, add-to-cart |
+| `AIGradingEvidence` | Collapsible AI inspection report: evidence[], defect scan with severity badges, size/colour verification, 7-factor risk formula breakdown, audit trail |
+| `TrustPassport` | Passport modal with condition report + "How AI verified this" expandable section (raw evidence, model, confidence, input hash) |
+| `PreventionBadge` | PDP warning chip ("Runs small — N buyers found this") |
+| `CreditsRedemption` | Credits discount calculator (≤20% of item price) |
+| `GreenImpact` | CO₂ saved + credits earned pill |
+| `CatalogCard` | New-product card for hero catalog grid |
+| `Spinner` | Inline loading spinner |
+
+---
+
+## Seed Data
+
+The seed script (`backend/seed/seed.py`) is idempotent and runs in 8 steps:
+
+1. Create all 6 DynamoDB tables + 2 S3 buckets
+2. Validate reference JSON files
+3. Write 30 buyers → `Buyers` + `BuyerInterestIndex`
+4. Write 15 items → `Items` (status = pending)
+5. Upload local seed photos (`seed/ITM_XXX/`) to S3
+6. Run `process_existing_item()` per item → grades, routes, generates passports, populates GradeCache
+7. Pre-warm recommendation cache for every buyer
+8. Print summary + verify cache hit latency < 100ms
+
+**Reference data** (`seed/reference/`):
+
+| File | Contents |
+|------|----------|
+| `carbon_table.json` | Manufacturing CO₂ kg + item weight per category |
+| `demand_table.json` | Regional demand signal (0.3–0.95) per city × category |
+| `city_coords.json` | Lat/long for 10 Indian cities |
+| `size_standard_map.json` | Category-specific size normalisation (US ↔ India sizing) |
+
+---
+
+## Feature Details
+
+### Sell Page — Grade-Before-Price Flow
+
+1. Seller fills in item details + rough asking price (hint shown: *upload media to unlock AI rec*)
+2. Uploads **photos (1–5) or a video (max 60s / 100 MB)** — at least one required
+   - Video duration enforced client-side via `loadedmetadata`
+   - >5 photos: explicit warning, first 5 kept
+   - Single-file uploads normalised via `_normalize_photos()` (FastAPI Pydantic v2 fix)
+3. On media upload → `POST /grade-preview` fires → spinner: *"AI grading your media…"*
+4. Real AI grade returned → `POST /listings/recommend-price` called with that grade → card: `AI grade: B · Recommended: ₹X (demand ×1.2)`
+5. Traffic-light on asking price: 🔴 too high / 🟡 too low / 🟢 optimal
+6. If ffmpeg missing + video-only → HTTP 422: *"Video grading requires ffmpeg. Please upload photos instead."*
+7. On D/REVIEW outcome → result panel always shows `recommended_price_inr` (backend computes it regardless of disposition)
+
+### Video Grading & Thumbnail
+
+When a video is uploaded with no photos:
+1. `extract_video_thumbnail()` → ffmpeg extracts a high-quality frame at 1s
+2. Thumbnail uploaded to S3 as `photos/{item_id}/thumbnail.jpg`, stored in `photo_keys`
+3. `video_graded: True` written to the Item record
+4. Listing page shows a 📹 *AI video analysis* overlay badge
+
+### Replacement Routing
+
+`/returns` accepts optional `replacement_option`:
+- `direct_replacement` — set `replacement_queued=True`; item routes through normal pipeline
+- `replace_with_resale` — force listing regardless of grade; add defective-deal notes; still calculate recommendations
+
+### Cart-Aware Recommendations
+
+`GET /buyers/{buyer_id}/recommendations?cart=item1,item2` excludes cart items from results and passes them to the LLM ranking prompt for feed diversification.
+
+### Photo Upload Compatibility
+
+FastAPI 0.111.0 / Pydantic v2 does not coerce a single `UploadFile` into `List[UploadFile]`. All photo-accepting endpoints declare `Optional[Union[UploadFile, List[UploadFile]]]` and normalise through `_normalize_photos()`.
+
+---
+
+## Project Structure
+
+```
+ReVival/
+├── .env                            # Root env file
+├── backend/
+│   ├── main.py                     # FastAPI app — all routes
+│   ├── orchestrator.py             # Agent pipeline runner + video thumbnail extraction
+│   ├── cache.py                    # SHA-256-keyed DynamoDB cache
+│   ├── agents/
+│   │   ├── grading.py              # AI vision grading (photos + video, 3 entry points)
+│   │   ├── disposition.py          # Deterministic routing
+│   │   ├── pricing.py              # Circular pricing + geo-aware buyer pricing
+│   │   ├── matching.py             # 2-stage buyer matching + 7-factor risk_factors()
+│   │   ├── green_credits.py        # CO₂ + credits calculation
+│   │   ├── passport.py             # LLM condition report + S3 HTML
+│   │   └── prevention.py           # Attribute correction + listing flags
+│   ├── db/
+│   │   ├── dynamo.py               # DynamoDB helpers
+│   │   └── s3.py                   # S3 upload + presign helpers
+│   └── seed/
+│       ├── seed.py                 # Idempotent seed script (8 steps)
+│       ├── buyers.json             # 30 buyer records
+│       ├── items.json              # 15 item records
+│       ├── ITM_XXX/                # Seed photos per item
+│       └── reference/              # carbon, demand, city_coords, size_map JSON
+└── frontend/
+    ├── pages/
+    │   ├── index.tsx               # Buyer homepage
+    │   ├── sell.tsx                # P2P seller + grade-preview flow
+    │   ├── return.tsx              # Return / trade-in flow
+    │   ├── search.tsx              # Search results
+    │   ├── cart.tsx                # Shopping cart
+    │   ├── exchange.tsx            # Trade-in calculator
+    │   ├── order-confirm.tsx       # Post-purchase confirmation
+    │   ├── ops.tsx                 # Ops dashboard
+    │   ├── product/[id].tsx        # Original PDP
+    │   └── refurb/[id].tsx         # Refurbished item detail
+    ├── components/
+    │   ├── AmazonHeader.tsx
+    │   ├── RecommendationCard.tsx
+    │   ├── AIGradingEvidence.tsx
+    │   ├── TrustPassport.tsx
+    │   ├── PreventionBadge.tsx
+    │   ├── CreditsRedemption.tsx
+    │   ├── GreenImpact.tsx
+    │   ├── CatalogCard.tsx
+    │   └── Spinner.tsx
+    ├── lib/
+    │   └── cart.ts                 # Cart state (localStorage + custom event bus)
+    └── data/
+        └── catalog.json            # Static product catalog
+```
+
+---
+
+## Numbers at a Glance
+
+| | |
+|--|--|
+| API endpoints | 25+ |
+| Agents | 7 (3 LLM, 4 deterministic) |
+| DynamoDB tables | 6 |
+| S3 buckets | 2 |
+| Seed buyers | 30 |
+| Seed items | 15 |
+| Supported Indian cities | 10 |
+| Product categories | 13 |
+| Risk score factors | 7 (4 deterministic + 2 LLM-derived + 1 eco) |
+| Frontend pages | 12 |
+| React components | 9 |
