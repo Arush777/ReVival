@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db.dynamo import get_item, put_item, update_item
 from orchestrator import process_return
+from agents.pricing import recommend_circular_price
 
 logging.basicConfig(level=logging.INFO)
 
@@ -126,6 +127,23 @@ async def post_community_list(
         update_item("Items", {"item_id": result["item_id"]}, {"base_price_inr": price})
 
     return result
+
+
+@app.get("/listings/recommend-price")
+async def get_recommend_price(
+    original_price: int,
+    grade: str,
+    category: str,
+    region: str,
+):
+    breakdown = recommend_circular_price(original_price, grade, category, region)
+    return {
+        "original_price": original_price,
+        "grade": grade.upper(),
+        "category": category.lower(),
+        "region": region,
+        **breakdown,
+    }
 
 
 @app.get("/listings/{listing_id}/warning")
