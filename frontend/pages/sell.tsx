@@ -84,6 +84,10 @@ interface SellResult {
   credits: number;
   passport_url?: string;
   warning_written: boolean;
+  // present for D/REVIEW outcomes
+  recommended_price_inr?: number;
+  grade_factor?: number;
+  demand_factor?: number;
 }
 
 function LeafIcon() {
@@ -758,16 +762,19 @@ export default function SellPage() {
                 >
                   <strong>Item needs review</strong> — our team will contact you within 24 hours to discuss the next steps.
                 </div>
-                {/* Price summary — shown even when manual review is triggered */}
+                {/* Price summary — uses backend-returned values so it's always present */}
                 <div style={{ marginBottom: "16px" }}>
                   {askingPrice && (
                     <div style={{ fontSize: "15px", fontWeight: "bold" }}>
                       Your asking price: ₹{parseInt(askingPrice).toLocaleString("en-IN")}
                     </div>
                   )}
-                  {priceRec && aiGrade && (
+                  {result.recommended_price_inr != null && (
                     <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
-                      AI recommended: ₹{priceRec.recommended_price.toLocaleString("en-IN")} (Grade {aiGrade} × demand {priceRec.demand_factor})
+                      AI recommended: ₹{result.recommended_price_inr.toLocaleString("en-IN")}
+                      {result.grade && result.demand_factor != null && (
+                        <span> (Grade {result.grade} × demand {result.demand_factor})</span>
+                      )}
                     </div>
                   )}
                 </div>

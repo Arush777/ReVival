@@ -189,9 +189,20 @@ async def post_community_list(
         if video_path:
             _cleanup([video_path])
 
-    # D or REVIEW: blocked from publishing, return minimal status
+    # D or REVIEW: blocked from publishing; still return grade + recommended price for seller transparency
     if result.get("grade") in ("D", "REVIEW"):
-        return {"status": result.get("disposition", "manual_review")}
+        grade = result["grade"]
+        original_price = item_payload.get("original_price_inr", 0)
+        category = item_payload.get("category", "other")
+        region = item_payload.get("return_hub_city", "Mumbai")
+        rec = recommend_circular_price(original_price, grade, category, region) if original_price else None
+        return {
+            "status": result.get("disposition", "manual_review"),
+            "grade": grade,
+            "recommended_price_inr": rec["recommended_price"] if rec else None,
+            "grade_factor": rec["grade_factor"] if rec else None,
+            "demand_factor": rec["demand_factor"] if rec else None,
+        }
 
     # Use seller-set listing price when provided; persist to DynamoDB so
     # downstream reads (recommendations, ops) see the correct asking price.
