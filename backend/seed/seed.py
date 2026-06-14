@@ -35,9 +35,9 @@ if str(BACKEND_DIR) not in sys.path:
 if str(SEED_DIR) not in sys.path:
     sys.path.insert(0, str(SEED_DIR))
 
-# Load .env before any AWS-dependent import
+# Load .env before any AWS-dependent import (.env lives at project root, not backend/)
 from dotenv import load_dotenv
-load_dotenv(BACKEND_DIR / ".env")
+load_dotenv(BACKEND_DIR.parent / ".env")
 
 # ── AWS + app imports (after .env is loaded) ─────────────────────────────────
 from botocore.exceptions import ClientError
