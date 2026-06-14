@@ -565,23 +565,52 @@ H22  pull main after Anupam merges feat/api-demand
 
 ---
 
-## Local Run
+## How to Run the Full Website
 
+The app is two processes: a FastAPI backend on **:8000** and a Next.js frontend on **:3000**. Run each in its own terminal.
+
+### Prerequisites
+- **Python 3.12** with the project venv at the repo root (`/ReVival/.venv`). The DB is already seeded on AWS (`ap-south-1`) and `DEMO_MODE=true`, so browsing makes **zero** Bedrock calls.
+- **Node + npm** (v18+). If `npm` is "command not found", install Node with Homebrew: `brew install node`.
+- `backend/.env` and `frontend/.env.local` must exist (they are gitignored — not in the repo). `frontend/.env.local`:
+  ```
+  NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+  NEXT_PUBLIC_DEMO_BUYER_ID=BUY-001
+  ```
+
+### Terminal 1 — Backend
 ```bash
-# Backend
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+source ../.venv/bin/activate        # venv lives at repo root, not in backend/
+uvicorn main:app --reload --port 8000
+```
+The module is `main:app`, so you must be **inside** `backend/` (running from the repo root gives `ModuleNotFoundError: No module named 'db'`).
+Verify: `curl http://localhost:8000/health` → `{"ok":true,...}`. Docs at `http://localhost:8000/docs`.
 
-# Frontend
+### Terminal 2 — Frontend
+```bash
 cd frontend
-npm install
+npm install        # first time only
 npm run dev
 ```
+No venv needed — npm and the Python venv are unrelated. Then open **`http://localhost:3000`**.
 
-Health check: `curl http://localhost:8000/health`  
-FastAPI docs: `http://localhost:8000/docs`
+### Pages to visit
+| URL | Screen |
+|---|---|
+| `http://localhost:3000` | Buyer recommendation feed (open as Riya) |
+| `/refurb/ITM-001` | Refurb listing — Trust Passport + apply credits |
+| `/product/LST-NIKE-AIR-270-BLK-10` | Original PDP with "23 buyers found this runs small" Fit Alert |
+| `/cart` | Shopping cart |
+| `/order-confirm` | Order confirmation + green impact |
+| `/return` | Returns flow (trade-in → `/exchange`) |
+| `/sell` | P2P seller listing |
+| `/ops` | Ops intelligence dashboard |
+
+### Troubleshooting
+- **Stuck on "Loading personalised picks…"** → the backend is down, OR Next.js started on **:3001** (because :3000 was busy) and CORS blocked it. Free the ports and restart on 3000: `lsof -ti:3000,3001,8000 | xargs kill -9`. `CORS_ORIGINS` in `backend/.env` now allows both 3000 and 3001.
+- **`Address already in use`** → a previous server is still running: `lsof -ti:8000 | xargs kill -9`.
+- **`npm: command not found`** → `brew install node`, then reopen the terminal.
 
 ---
 
