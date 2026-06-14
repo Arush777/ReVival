@@ -249,14 +249,8 @@ def _build_user_content(item: dict, canonical_images: list[bytes]) -> list[dict]
     return content
 
 
-def grade_item(item: dict, photo_keys: list[str]) -> dict:
-    # 1. Download photos from S3
-    photo_bytes_by_name: dict[str, bytes] = {}
-    for key in photo_keys:
-        resp = _s3.get_object(Bucket=os.environ["S3_PHOTOS_BUCKET"], Key=key)
-        photo_bytes_by_name[key] = resp["Body"].read()
-
-    # 2. Canonicalize: sorted images + stable item fields
+def _grade_from_bytes(item: dict, photo_bytes_by_name: dict[str, bytes]) -> dict:
+    """Core grading logic shared by S3-backed and local-path-backed entry points."""
     sorted_keys = sorted(photo_bytes_by_name.keys())
     canonical_images = [_process_single_image(photo_bytes_by_name[k]) for k in sorted_keys]
     canonical_image_bytes = b"".join(canonical_images)
@@ -266,18 +260,13 @@ def grade_item(item: dict, photo_keys: list[str]) -> dict:
         stable["seller_claimed_condition"] = "returned_open_box"
     canonical_item_json = json.dumps(stable, sort_keys=True)
 
-    # 3. Cache key
     cache_key = make_cache_key("grading", canonical_image_bytes, canonical_item_json, RUBRIC_VERSION, MODEL_ID)
-
-    # 4. Return cached result immediately
     cached = cache_get(cache_key)
     if cached:
         return cached
 
-    # 5. Build Bedrock request
     content = _build_user_content(item, canonical_images)
 
-    # 6. First Bedrock call
     raw_resp = _bedrock.converse(
         modelId=MODEL_ID,
         system=[{"text": _SYSTEM_PROMPT}],
@@ -286,7 +275,6 @@ def grade_item(item: dict, photo_keys: list[str]) -> dict:
     )
     raw_text = raw_resp["output"]["message"]["content"][0]["text"]
 
-    # 7. Parse + validate; retry once on failure
     obs = None
     try:
         obs = _extract_json(raw_text)
@@ -312,14 +300,10 @@ def grade_item(item: dict, photo_keys: list[str]) -> dict:
         obs = _extract_json(raw_text)
         _validate_obs(obs)
 
-    # 8. Apply objective blockers
     raw_llm_grade = obs["grade"]
     final_grade = finalize_grade(item, obs)
-
-    # 9. Normalize size using size_standard_map
     _normalize_size(item, obs)
 
-    # 10. Build and cache full result
     grader_input_hash = hashlib.sha256(
         canonical_image_bytes + canonical_item_json.encode()
     ).hexdigest()
@@ -349,6 +333,23 @@ def grade_item(item: dict, photo_keys: list[str]) -> dict:
 
     cache_put(cache_key, "grading", result)
     return result
+
+
+def grade_item(item: dict, photo_keys: list[str]) -> dict:
+    photo_bytes_by_name: dict[str, bytes] = {}
+    for key in photo_keys:
+        resp = _s3.get_object(Bucket=os.environ["S3_PHOTOS_BUCKET"], Key=key)
+        photo_bytes_by_name[key] = resp["Body"].read()
+    return _grade_from_bytes(item, photo_bytes_by_name)
+
+
+def grade_item_from_paths(item: dict, local_paths: list[str]) -> dict:
+    """Grade using local file paths — used by the preview endpoint (no S3 upload needed)."""
+    photo_bytes_by_name: dict[str, bytes] = {}
+    for path in local_paths:
+        with open(path, "rb") as f:
+            photo_bytes_by_name[path] = f.read()
+    return _grade_from_bytes(item, photo_bytes_by_name)
 
 
 def grade_from_video(item: dict, video_path: str) -> dict:

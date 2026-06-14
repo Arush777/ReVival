@@ -121,6 +121,10 @@ export default function SellPage() {
   const [video, setVideo] = useState<File | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
 
+  // AI grading state — set after media upload, drives price recommendation
+  const [aiGrade, setAiGrade] = useState<string | null>(null);
+  const [gradeLoading, setGradeLoading] = useState(false);
+
   // Price recommendation state
   const [priceRec, setPriceRec] = useState<{ recommended_price: number; grade_factor: number; demand_factor: number } | null>(null);
   const [priceRecLoading, setPriceRecLoading] = useState(false);
@@ -139,23 +143,57 @@ export default function SellPage() {
     return () => { urls.forEach((u) => URL.revokeObjectURL(u)); };
   }, [photos]);
 
-  // Price recommendation fires only once media (photos or video) is uploaded
+  // Call /grade-preview whenever media changes — stores real AI grade for price rec
+  useEffect(() => {
+    if (photos.length === 0 && !video) {
+      setAiGrade(null);
+      return;
+    }
+    if (!category) return;
+
+    let cancelled = false;
+    setGradeLoading(true);
+    setAiGrade(null);
+    setPriceRec(null);
+
+    (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("category", category === "other" ? "appliance" : category);
+        fd.append("condition", conditionNote);
+        if (video) {
+          fd.append("video", video);
+        } else {
+          for (const p of photos) fd.append("photos", p);
+        }
+        const res = await fetch(`${API_BASE}/grade-preview`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (!cancelled) setAiGrade(data.grade ?? null);
+      } catch {
+        if (!cancelled) setAiGrade(null);
+      } finally {
+        if (!cancelled) setGradeLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [photos, video, category, conditionNote]);
+
+  // Price recommendation fires once the real AI grade is available
   useEffect(() => {
     const mrp = parseInt(mrpPrice);
-    const hasMedia = photos.length > 0 || !!video;
-    if (!mrp || mrp <= 0 || !category || !hasMedia) {
+    if (!mrp || mrp <= 0 || !category || !aiGrade) {
       setPriceRec(null);
       return;
     }
 
-    const assumedGrade = CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade ?? "B";
     const backendCategory = category === "other" ? "appliance" : category;
 
     const timer = setTimeout(async () => {
       setPriceRecLoading(true);
       try {
         const res = await fetch(
-          `${API_BASE}/listings/recommend-price?original_price=${mrp}&grade=${assumedGrade}&category=${backendCategory}&region=${hubCity}`
+          `${API_BASE}/listings/recommend-price?original_price=${mrp}&grade=${aiGrade}&category=${backendCategory}&region=${hubCity}`
         );
         const data = await res.json();
         setPriceRec(data);
@@ -167,7 +205,7 @@ export default function SellPage() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [mrpPrice, category, conditionNote, hubCity, photos.length, video]);
+  }, [mrpPrice, category, hubCity, aiGrade]);
 
   async function handleRequestReview() {
     if (!result?.item_id) return;
@@ -475,8 +513,14 @@ export default function SellPage() {
                   )}
                 </div>
 
-                {/* AI recommended price card — shown only after media uploaded */}
-                {(photos.length > 0 || !!video) && priceRec && !priceRecLoading && (
+                {/* Grading + price rec status — only visible after media upload */}
+                {(photos.length > 0 || !!video) && gradeLoading && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#888", marginTop: "6px" }}>
+                    <Spinner size={12} color="#888" /> AI grading your media…
+                  </div>
+                )}
+
+                {(photos.length > 0 || !!video) && !gradeLoading && aiGrade && priceRec && !priceRecLoading && (
                   <div style={{
                     marginTop: "8px",
                     display: "flex",
@@ -488,25 +532,29 @@ export default function SellPage() {
                     border: "1px solid #d0d9e8",
                     fontSize: "13px",
                   }}>
-                    <span style={{ color: "#555" }}>AI recommends:</span>
+                    <span style={{ color: "#555" }}>AI grade:</span>
+                    <span style={{ fontWeight: "bold", color: GRADE_COLORS[aiGrade] ?? "#555" }}>
+                      {aiGrade}
+                    </span>
+                    <span style={{ color: "#555", marginLeft: "6px" }}>Recommended:</span>
                     <span style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "14px" }}>
                       ₹{priceRec.recommended_price.toLocaleString("en-IN")}
                     </span>
                     <span style={{ fontSize: "11px", color: "#888" }}>
-                      Grade {CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade ?? "B"} × demand {priceRec.demand_factor}
+                      (demand ×{priceRec.demand_factor})
                     </span>
                   </div>
                 )}
 
-                {(photos.length > 0 || !!video) && priceRecLoading && (
+                {(photos.length > 0 || !!video) && !gradeLoading && aiGrade && priceRecLoading && (
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#888", marginTop: "6px" }}>
-                    <Spinner size={12} color="#888" /> Calculating AI price recommendation…
+                    <Spinner size={12} color="#888" /> Calculating recommended price…
                   </div>
                 )}
 
-                {(photos.length > 0 || !!video) && !priceRec && !priceRecLoading && !mrpPrice && (
+                {(photos.length > 0 || !!video) && !gradeLoading && aiGrade && !priceRec && !priceRecLoading && !mrpPrice && (
                   <div style={{ fontSize: "12px", color: "#888", marginTop: "6px" }}>
-                    Enter Original MRP above to get AI price recommendation.
+                    Enter Original MRP above to get a price recommendation.
                   </div>
                 )}
 
@@ -742,9 +790,9 @@ export default function SellPage() {
                   <div style={{ fontSize: "15px", fontWeight: "bold" }}>
                     Your listing price: ₹{parseInt(askingPrice).toLocaleString("en-IN")}
                   </div>
-                  {priceRec && (
+                  {priceRec && aiGrade && (
                     <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
-                      AI recommended: ₹{priceRec.recommended_price.toLocaleString("en-IN")} (Grade {CONDITION_OPTIONS.find((c) => c.value === conditionNote)?.assumedGrade} × demand {priceRec.demand_factor})
+                      AI recommended: ₹{priceRec.recommended_price.toLocaleString("en-IN")} (Grade {aiGrade} × demand {priceRec.demand_factor})
                     </div>
                   )}
                 </div>
