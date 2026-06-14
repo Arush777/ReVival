@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
 
 from agents.disposition import compute_disposition
-from agents.grading import grade_item
+from agents.grading import grade_item, grade_from_video
 from agents.green_credits import compute_credits
 from agents.matching import match_buyers
 from agents.passport import generate_passport
@@ -148,13 +148,20 @@ def assemble_result(item: dict) -> dict:
 # Core pipelines
 # ---------------------------------------------------------------------------
 
-def _run_agents(item: dict, s3_keys: list[str], trade_in: bool) -> None:
+def _run_agents(item: dict, s3_keys: list[str], trade_in: bool, video_path: str | None = None) -> None:
     """
     Shared agent pipeline (steps 3-10) used by both process_return and
     process_existing_item. Mutates item in place and syncs DynamoDB.
     """
-    # 3. Grade
-    grading = grade_item(item, s3_keys)
+    # 3. Grade — prefer video over photos when available; fall back to photos on error
+    if video_path:
+        try:
+            grading = grade_from_video(item, video_path)
+        except Exception as exc:
+            logger.warning("Video grading failed (%s); falling back to photo grading", exc)
+            grading = grade_item(item, s3_keys)
+    else:
+        grading = grade_item(item, s3_keys)
     update_item_fields(item, grading)
 
     # 4. Disposition
@@ -208,7 +215,7 @@ def _run_agents(item: dict, s3_keys: list[str], trade_in: bool) -> None:
         pass
 
 
-def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False) -> dict:
+def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False, video_path: str | None = None) -> dict:
     # Extract replacement option before creating the item record
     replacement_option = payload.pop("replacement_option", None)
 
@@ -222,7 +229,7 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
     s3_keys = upload_photos(item["item_id"], photo_paths)
     update_item_field(item, "photo_keys", s3_keys)
 
-    _run_agents(item, s3_keys, trade_in)
+    _run_agents(item, s3_keys, trade_in, video_path=video_path)
 
     # Post-pipeline: handle replacement routing choices
     if replacement_option == "direct_replacement":

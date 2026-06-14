@@ -118,6 +118,8 @@ export default function SellPage() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [video, setVideo] = useState<File | null>(null);
+  const [videoPreview, setVideoPreview] = useState<string | null>(null);
 
   // Price recommendation state
   const [priceRec, setPriceRec] = useState<{ recommended_price: number; grade_factor: number; demand_factor: number } | null>(null);
@@ -180,10 +182,21 @@ export default function SellPage() {
     }
   }
 
+  function handleVideoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 100 * 1024 * 1024) {
+      setError("Video must be under 100 MB.");
+      return;
+    }
+    setVideo(file);
+    setVideoPreview(URL.createObjectURL(file));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (photos.length === 0) {
-      setError("Please upload at least one photo.");
+    if (photos.length === 0 && !video) {
+      setError("Please upload at least one photo or a video.");
       return;
     }
     if (!category || !askingPrice) {
@@ -227,6 +240,7 @@ export default function SellPage() {
       for (const photo of photos) {
         formData.append("photos", photo);
       }
+      if (video) formData.append("video", video);
 
       const res = await fetch(`${API_BASE}/community-list`, {
         method: "POST",
@@ -535,6 +549,32 @@ export default function SellPage() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Video inspection (optional) */}
+              <div style={{ marginTop: "16px" }}>
+                <label style={labelStyle}>
+                  Inspection Video{" "}
+                  <span style={{ color: "#888", fontWeight: "normal" }}>(optional, max 60s / 100 MB — overrides photo grading)</span>
+                </label>
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime"
+                  onChange={handleVideoChange}
+                  style={{ display: "block", fontSize: "13px", color: "#555" }}
+                />
+                {videoPreview && (
+                  <video
+                    src={videoPreview}
+                    controls
+                    style={{ marginTop: "8px", height: "128px", borderRadius: "4px", border: "1px solid #ddd", display: "block" }}
+                  />
+                )}
+                {video && (
+                  <div style={{ fontSize: "12px", color: "#2d6a4f", marginTop: "4px" }}>
+                    {video.name} selected
                   </div>
                 )}
               </div>

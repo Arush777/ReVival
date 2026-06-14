@@ -137,6 +137,8 @@ export default function ReturnPage() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [video, setVideo] = useState<File | null>(null);
+  const [videoPreview, setVideoPreview] = useState<string | null>(null);
 
   // Replacement flow
   const [replacementOption, setReplacementOption] = useState<"refund" | "direct_replacement" | "replace_with_resale">("refund");
@@ -224,10 +226,21 @@ export default function ReturnPage() {
     }
   }
 
+  function handleVideoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 100 * 1024 * 1024) {
+      setError("Video must be under 100 MB.");
+      return;
+    }
+    setVideo(file);
+    setVideoPreview(URL.createObjectURL(file));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (photos.length === 0) {
-      setError("Please upload at least one photo.");
+    if (photos.length === 0 && !video) {
+      setError("Please upload at least one photo or a video.");
       return;
     }
     const finalCategory = selectedOrder?.category ?? (category === "other" ? "appliance" : category);
@@ -275,6 +288,7 @@ export default function ReturnPage() {
       for (const photo of photos) {
         formData.append("photos", photo);
       }
+      if (video) formData.append("video", video);
 
       const res = await fetch(`${API_BASE}/returns`, {
         method: "POST",
@@ -629,6 +643,26 @@ export default function ReturnPage() {
                     </div>
                   )}
 
+                  {/* Video inspection (optional) */}
+                  <div style={{ marginTop: "4px", marginBottom: "14px" }}>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: "bold", marginBottom: "4px", color: "#333" }}>
+                      Inspection Video{" "}
+                      <span style={{ color: "#888", fontWeight: "normal" }}>(optional, max 60s / 100 MB — overrides photo grading)</span>
+                    </label>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime"
+                      onChange={handleVideoChange}
+                      style={{ display: "block", fontSize: "13px", color: "#555" }}
+                    />
+                    {videoPreview && (
+                      <video src={videoPreview} controls style={{ marginTop: "8px", height: "128px", borderRadius: "4px", border: "1px solid #ddd", display: "block" }} />
+                    )}
+                    {video && (
+                      <div style={{ fontSize: "12px", color: "#2d6a4f", marginTop: "4px" }}>{video.name} selected</div>
+                    )}
+                  </div>
+
                   {/* Replacement Flow Selector */}
                   <div
                     style={{
@@ -867,6 +901,26 @@ export default function ReturnPage() {
                       ))}
                     </div>
                   )}
+
+                  {/* Video inspection (optional) */}
+                  <div style={{ marginTop: "16px" }}>
+                    <label style={{ display: "block", fontSize: "13px", fontWeight: "bold", marginBottom: "4px", color: "#333" }}>
+                      Inspection Video{" "}
+                      <span style={{ color: "#888", fontWeight: "normal" }}>(optional, max 60s / 100 MB — overrides photo grading)</span>
+                    </label>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime"
+                      onChange={handleVideoChange}
+                      style={{ display: "block", fontSize: "13px", color: "#555" }}
+                    />
+                    {videoPreview && (
+                      <video src={videoPreview} controls style={{ marginTop: "8px", height: "128px", borderRadius: "4px", border: "1px solid #ddd", display: "block" }} />
+                    )}
+                    {video && (
+                      <div style={{ fontSize: "12px", color: "#2d6a4f", marginTop: "4px" }}>{video.name} selected</div>
+                    )}
+                  </div>
 
                   {/* Trade-in toggle */}
                   <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "10px" }}>

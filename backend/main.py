@@ -50,6 +50,12 @@ async def _save_uploads(photos: List[UploadFile]) -> list[str]:
     return paths
 
 
+async def _save_video(video: UploadFile) -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+        tmp.write(await video.read())
+        return tmp.name
+
+
 def _cleanup(paths: list[str]) -> None:
     for p in paths:
         try:
@@ -85,23 +91,30 @@ async def config():
 @app.post("/returns")
 async def post_returns(
     payload: str = Form(...),
-    photos: List[UploadFile] = File(...),
+    photos: Optional[List[UploadFile]] = File(default=None),
     trade_in: Optional[str] = Form(None),
     replacement_option: Optional[str] = Form(None),
+    video: Optional[UploadFile] = File(None),
 ):
     item_payload = json.loads(payload)
     is_trade_in = trade_in is not None and trade_in.lower() == "true"
+
+    if not photos and not video:
+        raise HTTPException(status_code=422, detail="Provide at least one photo or a video.")
 
     # Inject replacement_option into payload so orchestrator can route it.
     # Accepted values: "direct_replacement" | "replace_with_resale" | None (standard return).
     if replacement_option:
         item_payload["replacement_option"] = replacement_option
 
-    photo_paths = await _save_uploads(photos)
+    photo_paths = await _save_uploads(photos or [])
+    video_path = await _save_video(video) if video else None
     try:
-        result = process_return(item_payload, photo_paths, is_trade_in)
+        result = process_return(item_payload, photo_paths, is_trade_in, video_path=video_path)
     finally:
         _cleanup(photo_paths)
+        if video_path:
+            _cleanup([video_path])
 
     return result
 
@@ -109,17 +122,24 @@ async def post_returns(
 @app.post("/community-list")
 async def post_community_list(
     payload: str = Form(...),
-    photos: List[UploadFile] = File(...),
+    photos: Optional[List[UploadFile]] = File(default=None),
     trade_in: Optional[str] = Form(None),
+    video: Optional[UploadFile] = File(None),
 ):
     item_payload = json.loads(payload)
     listing_price_inr = item_payload.get("listing_price_inr")
 
-    photo_paths = await _save_uploads(photos)
+    if not photos and not video:
+        raise HTTPException(status_code=422, detail="Provide at least one photo or a video.")
+
+    photo_paths = await _save_uploads(photos or [])
+    video_path = await _save_video(video) if video else None
     try:
-        result = process_return(item_payload, photo_paths, False)
+        result = process_return(item_payload, photo_paths, False, video_path=video_path)
     finally:
         _cleanup(photo_paths)
+        if video_path:
+            _cleanup([video_path])
 
     # D or REVIEW: blocked from publishing, return minimal status
     if result.get("grade") in ("D", "REVIEW"):

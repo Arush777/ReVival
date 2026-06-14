@@ -3,6 +3,8 @@ import io
 import json
 import os
 import re
+import subprocess
+import tempfile
 
 import boto3
 from PIL import Image, ImageOps
@@ -193,6 +195,32 @@ def _normalize_size(item: dict, obs: dict) -> None:
     obs["size_mismatch"] = normalized_listed != normalized_detected
 
 
+def _extract_video_frames(video_path: str, n_frames: int = 5) -> list[bytes]:
+    """Extract up to n_frames evenly-spaced JPEG frames from a video using ffmpeg."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_pattern = os.path.join(tmpdir, "frame_%03d.jpg")
+        subprocess.run(
+            [
+                "ffmpeg", "-i", video_path,
+                "-vf", "fps=1",
+                "-frames:v", str(n_frames),
+                "-q:v", "3",
+                out_pattern,
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+        frames = []
+        for fname in sorted(os.listdir(tmpdir)):
+            if fname.endswith(".jpg"):
+                with open(os.path.join(tmpdir, fname), "rb") as f:
+                    frames.append(f.read())
+        if not frames:
+            raise RuntimeError("ffmpeg produced no frames from video")
+        return frames
+
+
 def _build_user_content(item: dict, canonical_images: list[bytes]) -> list[dict]:
     content = []
     for img_bytes in canonical_images:
@@ -320,4 +348,98 @@ def grade_item(item: dict, photo_keys: list[str]) -> dict:
     }
 
     cache_put(cache_key, "grading", result)
+    return result
+
+
+def grade_from_video(item: dict, video_path: str) -> dict:
+    """Grade an item by extracting frames from a local video file and running image grading."""
+    with open(video_path, "rb") as f:
+        video_bytes = f.read()
+
+    stable = {f: item.get(f) for f in _STABLE_FIELDS}
+    if not stable.get("seller_claimed_condition"):
+        stable["seller_claimed_condition"] = "returned_open_box"
+    canonical_item_json = json.dumps(stable, sort_keys=True)
+
+    cache_key = make_cache_key(
+        "grading_video",
+        video_bytes,
+        canonical_item_json,
+        RUBRIC_VERSION,
+        MODEL_ID,
+    )
+
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
+    frames = _extract_video_frames(video_path)
+    canonical_images = [_process_single_image(fb) for fb in frames]
+    content = _build_user_content(item, canonical_images)
+
+    raw_resp = _bedrock.converse(
+        modelId=MODEL_ID,
+        system=[{"text": _SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": content}],
+        inferenceConfig={"temperature": 0},
+    )
+    raw_text = raw_resp["output"]["message"]["content"][0]["text"]
+
+    obs = None
+    try:
+        obs = _extract_json(raw_text)
+        _validate_obs(obs)
+    except (ValueError, json.JSONDecodeError):
+        repair_content = [{
+            "text": (
+                "The response below was not valid JSON or was missing required fields. "
+                "Return ONLY the corrected JSON with no extra text:\n\n" + raw_text
+            )
+        }]
+        repair_resp = _bedrock.converse(
+            modelId=MODEL_ID,
+            system=[{"text": _SYSTEM_PROMPT}],
+            messages=[
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": [{"text": raw_text}]},
+                {"role": "user", "content": repair_content},
+            ],
+            inferenceConfig={"temperature": 0},
+        )
+        raw_text = repair_resp["output"]["message"]["content"][0]["text"]
+        obs = _extract_json(raw_text)
+        _validate_obs(obs)
+
+    raw_llm_grade = obs["grade"]
+    final_grade = finalize_grade(item, obs)
+    _normalize_size(item, obs)
+
+    grader_input_hash = hashlib.sha256(
+        video_bytes + canonical_item_json.encode()
+    ).hexdigest()
+
+    result = {
+        "grade": final_grade,
+        "raw_llm_grade": raw_llm_grade,
+        "grade_bucket": obs["grade_bucket"],
+        "confidence_bucket": obs["confidence_bucket"],
+        "detected_category": obs["detected_category"],
+        "functional_status": obs["functional_status"],
+        "safety_or_hygiene_blocker": obs["safety_or_hygiene_blocker"],
+        "critical_missing_parts": obs["critical_missing_parts"],
+        "wear_level": obs["wear_level"],
+        "defects": obs["defects"],
+        "detected_color": obs["detected_color"],
+        "detected_size": obs["detected_size"],
+        "size_mismatch": obs["size_mismatch"],
+        "color_mismatch": obs["color_mismatch"],
+        "mismatch_notes": obs["mismatch_notes"],
+        "evidence": obs["evidence"],
+        "rubric_version": RUBRIC_VERSION,
+        "prompt_version": PROMPT_VERSION,
+        "model_id": MODEL_ID,
+        "grader_input_hash": grader_input_hash,
+    }
+
+    cache_put(cache_key, "grading_video", result)
     return result
