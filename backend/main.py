@@ -343,8 +343,9 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10, cart: str = 
 
         sorted_ids = json.dumps(sorted(i["item_id"] for i in candidates))
         cart_key_str = json.dumps(sorted(cart_item_ids))
+        secondary = f"{sorted_ids}||cart:{cart_key_str}"
         cache_key = make_cache_key(
-            "recommendations", buyer_id.encode(), sorted_ids, cart_key_str, "v2",
+            "recommendations", buyer_id.encode(), secondary, "v2",
             os.environ["BEDROCK_TEXT_MODEL_ID"],
         )
         if not cache_get(cache_key):

@@ -298,11 +298,11 @@ def get_recommendations(
 
     sorted_item_ids_str = json.dumps(sorted(i["item_id"] for i in candidates))
     cart_key_str = json.dumps(sorted(cart_item_ids or []))
+    secondary = f"{sorted_item_ids_str}||cart:{cart_key_str}"
     cache_key = make_cache_key(
         "recommendations",
         buyer_id.encode(),
-        sorted_item_ids_str,
-        cart_key_str,
+        secondary,
         "v2",
         MODEL_ID,
     )
