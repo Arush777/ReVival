@@ -370,6 +370,8 @@ async def get_item_detail(item_id: str):
         "return_hub_city": item.get("return_hub_city", ""),
         "photo_urls": photo_urls,
         "passport_url": passport_url,
+        "seller_id": item.get("seller_id", ""),
+        "owner_count": item.get("owner_count", 1),
         "co2_saved_kg": item.get("co2_saved_kg", 0),
         "credits": item.get("credits", 0),
         "matches": item.get("matches", []),

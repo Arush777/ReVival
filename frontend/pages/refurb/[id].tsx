@@ -38,6 +38,7 @@ interface ItemData {
   passport_url: string;
   co2_saved_kg: number;
   credits: number;
+  seller_id: string;
   matches: { buyer_id: string; re_return_risk: number }[];
 }
 
@@ -352,48 +353,65 @@ export default function RefurbPage() {
             )}
 
             {/* CTA buttons */}
-            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-              <button
-                onClick={handleAddToCart}
+            {item.seller_id === BUYER_ID ? (
+              <div
                 style={{
-                  backgroundColor: added ? "#2d6a4f" : "#FF9900",
-                  color: added ? "white" : "#000",
-                  border: "none",
+                  border: "1px solid #ddd",
                   borderRadius: "4px",
-                  padding: "10px 24px",
-                  fontSize: "15px",
-                  fontWeight: "bold",
-                  cursor: "pointer",
-                  flex: 1,
-                  transition: "background-color 0.2s",
+                  padding: "14px",
+                  backgroundColor: "#f9f9f9",
+                  color: "#555",
+                  fontSize: "14px",
+                  textAlign: "center",
                 }}
               >
-                {added ? "✓ Added to Cart" : "Add to Cart"}
-              </button>
-              <button
-                onClick={handleBuyNow}
-                style={{
-                  backgroundColor: "#FFA41C",
-                  color: "#000",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "10px 24px",
-                  fontSize: "15px",
-                  fontWeight: "bold",
-                  cursor: "pointer",
-                  flex: 1,
-                }}
-              >
-                Buy Now
-              </button>
-            </div>
-
-            {added && (
-              <div style={{ marginTop: "10px" }}>
-                <Link href="/cart" style={{ color: "#146EB4", fontSize: "13px", fontWeight: "bold" }}>
-                  Go to Cart →
-                </Link>
+                This is your listing — not available for purchase by you.
               </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                  <button
+                    onClick={handleAddToCart}
+                    style={{
+                      backgroundColor: added ? "#2d6a4f" : "#FF9900",
+                      color: added ? "white" : "#000",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "10px 24px",
+                      fontSize: "15px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      flex: 1,
+                      transition: "background-color 0.2s",
+                    }}
+                  >
+                    {added ? "✓ Added to Cart" : "Add to Cart"}
+                  </button>
+                  <button
+                    onClick={handleBuyNow}
+                    style={{
+                      backgroundColor: "#FFA41C",
+                      color: "#000",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "10px 24px",
+                      fontSize: "15px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      flex: 1,
+                    }}
+                  >
+                    Buy Now
+                  </button>
+                </div>
+                {added && (
+                  <div style={{ marginTop: "10px" }}>
+                    <Link href="/cart" style={{ color: "#146EB4", fontSize: "13px", fontWeight: "bold" }}>
+                      Go to Cart →
+                    </Link>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

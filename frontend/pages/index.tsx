@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import AmazonHeader from "../components/AmazonHeader";
 import RecommendationCard, { RecommendationCardProps } from "../components/RecommendationCard";
+import CatalogCard from "../components/CatalogCard";
+import catalogData from "../data/catalog.json";
+import { CatalogProduct } from "../components/CatalogCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const BUYER_ID = process.env.NEXT_PUBLIC_DEMO_BUYER_ID || "BUY-001";
+
+const ALL_CATALOG: CatalogProduct[] = [
+  ...(catalogData.heroes as CatalogProduct[]),
+  ...(catalogData.filler as CatalogProduct[]),
+];
 
 interface RecsResponse {
   buyer_id: string;
@@ -95,6 +103,27 @@ export default function HomePage() {
             ))}
           </div>
         )}
+
+        {/* Catalog grid */}
+        <div style={{ marginTop: "40px" }}>
+          <h2 style={{ fontSize: "22px", fontWeight: "bold", margin: "0 0 4px 0", color: "#0F1111" }}>
+            Shop on Amazon
+          </h2>
+          <p style={{ fontSize: "13px", color: "#555", margin: "0 0 20px 0" }}>
+            Products with a green ♻ badge have a Certified Second Life option available.
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            {ALL_CATALOG.map((product) => (
+              <CatalogCard key={product.catalog_id} product={product} />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

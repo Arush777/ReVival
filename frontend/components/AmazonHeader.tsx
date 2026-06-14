@@ -369,7 +369,7 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
             }}
           >
             <NavLink href="/" label="Second Life" />
-            <NavLink href="/product/LST-NIKE-AIR-270-BLK-10" label="Original PDP" />
+            <NavLink href="/product/NK-AM270" label="Original PDP" />
             <NavLink href="/sell" label="Sell Your Item" />
             <NavLink href="/return" label="Returns" />
             <NavLink href="/ops" label="Ops Dashboard" />
