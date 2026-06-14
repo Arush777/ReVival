@@ -461,6 +461,26 @@ async def get_ops_items(status: Optional[str] = None, limit: int = 50):
     return {"items": ops_items}
 
 
+@app.post("/items/{item_id}/request-review")
+async def request_item_review(item_id: str):
+    item = get_item("Items", {"item_id": item_id})
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Item {item_id} not found", "details": {}}},
+        )
+    update_item("Items", {"item_id": item_id}, {"status": "manual_review"})
+    logging.info(
+        "[HITL] Human review requested for item=%s grade=%s disposition=%s",
+        item_id, item.get("grade", "unknown"), item.get("disposition", "unknown"),
+    )
+    return {
+        "item_id": item_id,
+        "status": "manual_review",
+        "message": "Human review requested. A circular commerce expert will verify this item.",
+    }
+
+
 @app.get("/search/suggestions")
 async def get_search_suggestions(q: str = "", limit: int = 8):
     if not q or len(q) < 2:
