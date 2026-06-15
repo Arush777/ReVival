@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 export interface CatalogProduct {
   catalog_id: string;
@@ -13,6 +15,7 @@ export interface CatalogProduct {
   image: string;
   listing_id?: string;
   second_life_item_id?: string;
+  seller_description?: string;
 }
 
 function Stars({ rating }: { rating: number }) {
@@ -27,7 +30,30 @@ function Stars({ rating }: { rating: number }) {
 
 export default function CatalogCard({ product }: { product: CatalogProduct }) {
   const [imgError, setImgError] = useState(false);
-  const hasSecondLife = !!product.second_life_item_id;
+  // Backend-driven badge: a Second Life option exists only when the referenced
+  // item has actually been graded and listed. Items that list LIVE on return
+  // (Adidas, Levi's) start with no listed counterpart, so the badge stays
+  // hidden until a return creates one — then it flips on automatically.
+  const [hasSecondLife, setHasSecondLife] = useState(false);
+
+  useEffect(() => {
+    if (!product.second_life_item_id) {
+      setHasSecondLife(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE}/items/${product.second_life_item_id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setHasSecondLife(!d.error && d.status === "listed");
+      })
+      .catch(() => {
+        if (!cancelled) setHasSecondLife(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product.second_life_item_id]);
 
   return (
     <Link

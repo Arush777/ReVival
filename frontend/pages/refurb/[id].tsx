@@ -6,6 +6,7 @@ import TrustPassport from "../../components/TrustPassport";
 import GreenImpact from "../../components/GreenImpact";
 import CreditsRedemption from "../../components/CreditsRedemption";
 import AIGradingEvidence from "../../components/AIGradingEvidence";
+import PreventionBadge from "../../components/PreventionBadge";
 import { addToCart } from "../../lib/cart";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -93,6 +94,15 @@ interface BuyerData {
   credit_score: number;
 }
 
+interface WarningData {
+  has_warning: boolean;
+  flag_type?: "size" | "color" | "condition";
+  return_count_for_reason?: number;
+  recommendation?: string;
+  flag_source?: "visual" | "claim" | "both";
+  evidence?: string;
+}
+
 export default function RefurbPage() {
   const router = useRouter();
   const { id } = router.query as { id: string };
@@ -100,6 +110,7 @@ export default function RefurbPage() {
   const [item, setItem] = useState<ItemData | null>(null);
   const [passport, setPassport] = useState<PassportData | null>(null);
   const [buyer, setBuyer] = useState<BuyerData | null>(null);
+  const [warning, setWarning] = useState<WarningData | null>(null);
   const [displayPrice, setDisplayPrice] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +136,15 @@ export default function RefurbPage() {
         setDisplayPrice(itemData.base_price_inr);
         setPassport(passportData);
         setBuyer(buyerData);
+
+        // Seller-vs-returner claim discrepancy (or visual mismatch) for this
+        // listing — the honesty signal shown on the resold listing itself.
+        if (itemData.listing_id) {
+          fetch(`${API_BASE}/listings/${itemData.listing_id}/warning`)
+            .then((r) => r.json())
+            .then((w) => setWarning(w))
+            .catch(() => {});
+        }
       })
       .catch(() => setError("Failed to load item data."))
       .finally(() => setLoading(false));
@@ -404,6 +424,20 @@ export default function RefurbPage() {
             <div style={{ fontSize: "13px", color: "#555", marginBottom: "12px" }}>
               Size: <strong>{item.listed_size}</strong> · Colour: <strong>{item.listed_color}</strong>
             </div>
+
+            {/* Seller-vs-returner discrepancy / fit alert — full transparency
+                on the resold listing itself. */}
+            {warning?.has_warning && (
+              <div style={{ marginBottom: "12px" }}>
+                <PreventionBadge
+                  flag_type={warning.flag_type!}
+                  return_count_for_reason={warning.return_count_for_reason!}
+                  recommendation={warning.recommendation!}
+                  flag_source={warning.flag_source}
+                  evidence={warning.evidence}
+                />
+              </div>
+            )}
 
             {/* Credits redemption */}
             {buyer && (

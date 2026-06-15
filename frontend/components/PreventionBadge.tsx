@@ -1,7 +1,9 @@
 interface PreventionBadgeProps {
-  flag_type: "size" | "color";
+  flag_type: "size" | "color" | "condition";
   return_count_for_reason: number;
   recommendation: string;
+  flag_source?: "visual" | "claim" | "both";
+  evidence?: string;
 }
 
 function WarningIcon() {
@@ -23,8 +25,27 @@ export default function PreventionBadge({
   flag_type,
   return_count_for_reason,
   recommendation,
+  flag_source,
+  evidence,
 }: PreventionBadgeProps) {
-  const alertLabel = flag_type === "size" ? "FIT ALERT" : "COLOR ALERT";
+  const alertLabel =
+    flag_type === "size" ? "FIT ALERT" : flag_type === "color" ? "COLOR ALERT" : "CONDITION ALERT";
+
+  const finding =
+    flag_type === "size"
+      ? "runs small"
+      : flag_type === "color"
+      ? "looks different in person"
+      : "differs from the listing description";
+
+  // A claim-sourced flag means the seller's written listing disagreed with what
+  // a returner reported — call that out explicitly.
+  const sourceLine =
+    flag_source === "claim"
+      ? "Seller's listing description didn't match a returner's report."
+      : flag_source === "both"
+      ? "Confirmed by both AI photo inspection and a returner's report."
+      : "Based on verified return data — AI-analysed";
 
   return (
     <div
@@ -49,13 +70,15 @@ export default function PreventionBadge({
         </span>
       </div>
       <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#333" }}>
-        {return_count_for_reason} buyers found this{" "}
-        {flag_type === "size" ? "runs small" : "looks different in person"}.
+        {return_count_for_reason} buyer{return_count_for_reason === 1 ? "" : "s"} found this {finding}.
       </p>
       <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#555" }}>{recommendation}</p>
-      <p style={{ margin: "0", fontSize: "11px", color: "#888" }}>
-        Based on verified return data — AI-analysed
-      </p>
+      {evidence && (
+        <p style={{ margin: "0 0 4px 0", fontSize: "12px", color: "#666", fontStyle: "italic" }}>
+          "{evidence}"
+        </p>
+      )}
+      <p style={{ margin: "0", fontSize: "11px", color: "#888" }}>{sourceLine}</p>
     </div>
   );
 }

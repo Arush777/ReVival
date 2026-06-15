@@ -3,8 +3,8 @@
     "buyer_id": "BUY-001", "name": "Riya Shah",
     "region": "Surat", "primary_category": "shoes",
     "lat": 21.17, "lng": 72.83,
-    "category_interests": ["shoes", "bag"],
-    "size_profile": { "shoes": "India 9", "fit_tendency": "snug", "shirt": "M" },
+    "category_interests": ["shoes", "bag", "jeans"],
+    "size_profile": { "shoes": "India 9", "fit_tendency": "snug", "shirt": "M", "jeans": "32x30" },
     "preferences": ["Nike", "Adidas", "sizes up", "snug fit"],
     "purchase_history": [
       { "category": "shoes", "brand": "Nike", "kept": true },

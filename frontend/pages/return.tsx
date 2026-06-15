@@ -17,6 +17,7 @@ interface OrderItem {
   listed_size: string;
   listed_color: string;
   original_price_inr: number;
+  seller_description?: string;
 }
 
 const CATEGORY_GROUPS = [
@@ -74,12 +75,21 @@ const RETURN_REASONS = [
   { value: "defective_not_working", label: "Defective / Does not work properly", group: "Defective" },
   { value: "different_from_ordered", label: "Different from what was ordered", group: "Catalog Mismatch" },
   { value: "wrong_size", label: "Wrong size", group: "Catalog Mismatch" },
+  { value: "wrong_color", label: "Colour different from listing", group: "Catalog Mismatch" },
   { value: "bought_by_mistake", label: "Bought by mistake", group: "Change of Mind" },
   { value: "no_longer_needed", label: "No longer needed", group: "Change of Mind" },
   { value: "better_price_available", label: "Better price available", group: "Change of Mind" },
 ];
 
 const RETURN_REASON_GROUPS = ["Defective", "Catalog Mismatch", "Change of Mind"];
+
+const GRADE_COLORS: Record<string, string> = {
+  A: "#2e7d32",
+  B: "#0277BD",
+  C: "#e65100",
+  D: "#b71c1c",
+  REVIEW: "#6a1b9a",
+};
 
 const CITIES = [
   "Mumbai", "Delhi", "Bangalore", "Surat", "Ahmedabad",
@@ -98,6 +108,13 @@ interface ReturnResult {
   passport_url?: string;
   top_matches?: { buyer_id: string; name: string; re_return_risk: number; why_this_fits: string }[];
   warning_written: boolean;
+  seller_description?: string;
+  return_reason_text?: string;
+  returner_report?: string;
+  claim_color_mismatch?: boolean;
+  claim_size_mismatch?: boolean;
+  claim_condition_mismatch?: boolean;
+  claim_discrepancy_notes?: string;
 }
 
 function LeafIcon() {
@@ -143,6 +160,12 @@ export default function ReturnPage() {
   // Replacement flow
   const [replacementOption, setReplacementOption] = useState<"refund" | "direct_replacement" | "replace_with_resale">("refund");
   const [listingPrice, setListingPrice] = useState("");
+
+  // AI grading + price recommendation for replace_with_resale — identical to the
+  // Sell page: the real vision model inspects the uploaded media (no hardcoded
+  // grade), and only then a price is recommended.
+  const [aiGrade, setAiGrade] = useState<string | null>(null);
+  const [gradeLoading, setGradeLoading] = useState(false);
   const [priceRec, setPriceRec] = useState<{ recommended_price: number; grade_factor: number; demand_factor: number } | null>(null);
   const [priceRecLoading, setPriceRecLoading] = useState(false);
 
@@ -174,21 +197,54 @@ export default function ReturnPage() {
       .finally(() => setOrdersLoading(false));
   }, []);
 
-  // Live price recommendation for replace_with_resale flow
+  // Replace-with-resale: run the REAL vision model on the uploaded media (same
+  // as the Sell page) to get the actual AI grade. Only fires once media is
+  // present — nothing is graded or recommended before the image is inspected.
   useEffect(() => {
-    if (replacementOption !== "replace_with_resale" || !listingPrice || !selectedOrder) {
+    if (replacementOption !== "replace_with_resale") { setAiGrade(null); return; }
+    if (photos.length === 0 && !video) { setAiGrade(null); setPriceRec(null); return; }
+    const finalCategory = selectedOrder?.category ?? (category === "other" ? "appliance" : category);
+    if (!finalCategory) return;
+
+    let cancelled = false;
+    setGradeLoading(true);
+    setAiGrade(null);
+    setPriceRec(null);
+    (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("category", finalCategory);
+        fd.append("condition", "returned_open_box");
+        if (video) {
+          fd.append("video", video);
+        } else {
+          for (const p of photos) fd.append("photos", p);
+        }
+        const res = await fetch(`${API_BASE}/grade-preview`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (!cancelled) setAiGrade(res.ok ? (data.grade ?? null) : null);
+      } catch {
+        if (!cancelled) setAiGrade(null);
+      } finally {
+        if (!cancelled) setGradeLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [photos, video, replacementOption, selectedOrder, category]);
+
+  // Price recommendation fires once the real AI grade is available.
+  useEffect(() => {
+    if (replacementOption !== "replace_with_resale" || !aiGrade || !selectedOrder) {
       setPriceRec(null);
       return;
     }
-    const priceNum = parseInt(listingPrice);
-    if (!priceNum || priceNum <= 0) { setPriceRec(null); return; }
-
+    const backendCategory = selectedOrder.category;
+    const orig = selectedOrder.original_price_inr;
     const timer = setTimeout(async () => {
       setPriceRecLoading(true);
       try {
-        const origPrice = selectedOrder.original_price_inr;
         const res = await fetch(
-          `${API_BASE}/listings/recommend-price?original_price=${origPrice}&grade=C&category=${selectedOrder.category}&region=${hubCity}`
+          `${API_BASE}/listings/recommend-price?original_price=${orig}&grade=${aiGrade}&category=${backendCategory}&region=${hubCity}`
         );
         const data = await res.json();
         setPriceRec(data);
@@ -199,7 +255,7 @@ export default function ReturnPage() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [listingPrice, replacementOption, selectedOrder, hubCity]);
+  }, [aiGrade, replacementOption, selectedOrder, hubCity]);
 
   function handleOrderSelect(order: OrderItem) {
     setSelectedOrder(order);
@@ -254,7 +310,10 @@ export default function ReturnPage() {
     setResult(null);
 
     try {
-      const itemId = `ITM-UPLOAD-${Date.now()}`;
+      // For an order from history, reuse its item_id so a live return creates
+      // exactly the item the catalog product page references (its
+      // second_life_item_id). Manual entries get a fresh upload id.
+      const itemId = selectedOrder?.item_id ?? `ITM-UPLOAD-${Date.now()}`;
 
       const payload: Record<string, unknown> = {
         item_id: itemId,
@@ -272,6 +331,12 @@ export default function ReturnPage() {
         history_note: detailedComments || "Submitted via return flow",
         status: "pending",
       };
+
+      // The seller's original listing claim flows into the return so the AI can
+      // compare it against the returner's account (claim-discrepancy detection).
+      if (selectedOrder?.seller_description) {
+        payload.seller_description = selectedOrder.seller_description;
+      }
 
       if (replacementOption === "replace_with_resale" && listingPrice) {
         payload.listing_price_inr = parseInt(listingPrice);
@@ -325,7 +390,7 @@ export default function ReturnPage() {
   const isManualReview =
     result?.grade === "D" || result?.grade === "REVIEW" || result?.disposition === "manual_review";
 
-  // Price warning for the listing price field
+  // Price warning for the listing-price field — driven by the REAL AI grade.
   const listingPriceNum = parseInt(listingPrice) || 0;
   let priceWarning: { text: string; color: string; bg: string } | null = null;
   if (priceRec && listingPriceNum > 0) {
@@ -707,7 +772,6 @@ export default function ReturnPage() {
                             onChange={() => {
                               setReplacementOption(opt);
                               setListingPrice("");
-                              setPriceRec(null);
                             }}
                             style={{ marginTop: "2px", cursor: "pointer" }}
                           />
@@ -723,12 +787,20 @@ export default function ReturnPage() {
                     {replacementOption === "replace_with_resale" && (
                       <div style={{ marginTop: "12px", paddingLeft: "4px" }}>
                         <label style={labelStyle}>Your listing price for the faulty item (₹)</label>
+
+                        {/* Hint when no media yet — recommendation needs the image first */}
+                        {photos.length === 0 && !video && (
+                          <div style={{ fontSize: "12px", color: "#888", marginBottom: "6px" }}>
+                            Upload a photo or video above — the AI inspects it and recommends a price.
+                          </div>
+                        )}
+
                         <div style={{ position: "relative" }}>
                           <input
                             type="number"
                             value={listingPrice}
                             onChange={(e) => setListingPrice(e.target.value)}
-                            placeholder={`e.g. ${Math.round((selectedOrder?.original_price_inr ?? 1000) * 0.4)}`}
+                            placeholder={priceRec ? `e.g. ₹${priceRec.recommended_price.toLocaleString("en-IN")}` : `e.g. ${Math.round((selectedOrder?.original_price_inr ?? 1000) * 0.4)}`}
                             min="1"
                             style={{
                               ...inputStyle,
@@ -739,13 +811,47 @@ export default function ReturnPage() {
                                 : "#ccc",
                             }}
                           />
-                          {priceRecLoading && (
-                            <span style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)" }}>
-                              <Spinner size={14} color="#888" />
-                            </span>
-                          )}
                         </div>
-                        {priceWarning && (
+
+                        {/* Grading status — only after media upload */}
+                        {(photos.length > 0 || !!video) && gradeLoading && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#888", marginTop: "6px" }}>
+                            <Spinner size={12} color="#888" /> AI grading your media…
+                          </div>
+                        )}
+
+                        {/* Real AI grade + recommended price (from inspecting the media) */}
+                        {(photos.length > 0 || !!video) && !gradeLoading && aiGrade && priceRec && !priceRecLoading && (
+                          <div style={{
+                            marginTop: "8px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            padding: "8px 12px",
+                            borderRadius: "6px",
+                            backgroundColor: "#f0f4f8",
+                            border: "1px solid #d0d9e8",
+                            fontSize: "13px",
+                            flexWrap: "wrap",
+                          }}>
+                            <span style={{ color: "#555" }}>AI grade:</span>
+                            <span style={{ fontWeight: "bold", color: GRADE_COLORS[aiGrade] ?? "#555" }}>{aiGrade}</span>
+                            <span style={{ color: "#555", marginLeft: "6px" }}>Recommended:</span>
+                            <span style={{ fontWeight: "bold", color: "#1a1a1a", fontSize: "14px" }}>
+                              ₹{priceRec.recommended_price.toLocaleString("en-IN")}
+                            </span>
+                            <span style={{ fontSize: "11px", color: "#888" }}>(demand ×{priceRec.demand_factor})</span>
+                          </div>
+                        )}
+
+                        {(photos.length > 0 || !!video) && !gradeLoading && aiGrade && priceRecLoading && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#888", marginTop: "6px" }}>
+                            <Spinner size={12} color="#888" /> Calculating recommended price…
+                          </div>
+                        )}
+
+                        {/* Traffic-light price warning */}
+                        {priceWarning && (photos.length > 0 || !!video) && (
                           <div
                             style={{
                               marginTop: "6px",
@@ -759,11 +865,6 @@ export default function ReturnPage() {
                             }}
                           >
                             {priceWarning.text}
-                          </div>
-                        )}
-                        {priceRec && (
-                          <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>
-                            AI estimate based on Grade C × demand factor {priceRec.demand_factor}
                           </div>
                         )}
                       </div>
@@ -1006,6 +1107,65 @@ export default function ReturnPage() {
                   <InfoRow label="You earn" value={`${result.credits} green credits`} />
                   <InfoRow label="CO₂ saved" value={`${result.co2_saved_kg} kg ≈ ${Math.round((result.co2_saved_kg ?? 0) * 5)} km by car`} />
                 </div>
+
+                {/* AI Listing-Accuracy Check — seller's claim vs your report */}
+                {(() => {
+                  const sellerClaim = result.seller_description || selectedOrder?.seller_description;
+                  if (!sellerClaim) return null;
+                  const yourReport =
+                    result.returner_report ||
+                    detailedComments ||
+                    result.return_reason_text ||
+                    "";
+                  const mismatch =
+                    result.claim_color_mismatch
+                      ? "colour"
+                      : result.claim_size_mismatch
+                      ? "size"
+                      : result.claim_condition_mismatch
+                      ? "condition"
+                      : null;
+                  return (
+                    <div
+                      style={{
+                        border: `1px solid ${mismatch ? "#ffc107" : "#95d5b2"}`,
+                        backgroundColor: mismatch ? "#fff8e1" : "#f0faf4",
+                        borderRadius: "6px",
+                        padding: "14px 16px",
+                        marginBottom: "16px",
+                      }}
+                    >
+                      <div style={{ fontSize: "13px", fontWeight: "bold", color: "#0F1111", marginBottom: "8px" }}>
+                        🔍 AI Listing-Accuracy Check
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#555", marginBottom: "2px" }}>
+                        <strong>Seller's listing claimed:</strong>
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#333", marginBottom: "8px", fontStyle: "italic" }}>
+                        "{sellerClaim}"
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#555", marginBottom: "2px" }}>
+                        <strong>You reported:</strong>
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#333", marginBottom: "10px", fontStyle: "italic" }}>
+                        "{yourReport}"{result.return_reason_text ? ` (reason: ${result.return_reason_text})` : ""}
+                      </div>
+                      {mismatch ? (
+                        <div style={{ fontSize: "13px", color: "#856404" }}>
+                          ⚠ <strong>Discrepancy detected ({mismatch}).</strong>{" "}
+                          {result.claim_discrepancy_notes}
+                          <div style={{ fontSize: "12px", color: "#856404", marginTop: "6px" }}>
+                            A {mismatch} alert will now appear on this product's page to protect future buyers.
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: "13px", color: "#2d6a4f" }}>
+                          ✓ No discrepancy found — your report is consistent with the seller's description.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {result.top_matches && result.top_matches.length > 0 && (
                   <div style={{ marginBottom: "16px" }}>

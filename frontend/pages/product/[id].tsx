@@ -16,13 +16,16 @@ const ALL_PRODUCTS: CatalogProduct[] = [
 
 interface WarningData {
   has_warning: boolean;
-  flag_type?: "size" | "color";
+  flag_type?: "size" | "color" | "condition";
   return_count_for_reason?: number;
   recommendation?: string;
+  flag_source?: "visual" | "claim" | "both";
+  evidence?: string;
 }
 
 interface SecondLifeItem {
   item_id: string;
+  status: string;
   grade: string;
   base_price_inr: number;
   return_hub_city: string;
@@ -78,8 +81,11 @@ export default function ProductPage() {
       calls.push(
         fetch(`${API_BASE}/items/${product.second_life_item_id}`)
           .then((r) => r.json())
+          // Only show the panel for a genuinely listed counterpart. An item
+          // that graded D/REVIEW on a live return still exists but is not
+          // listed — don't surface a "Buy it" panel for it.
           .then((d) => {
-            if (!d.error) setSecondLife(d);
+            if (!d.error && d.status === "listed") setSecondLife(d);
           })
           .catch(() => {})
       );
@@ -198,6 +204,18 @@ export default function ProductPage() {
               </span>
             </div>
 
+            {/* Seller's listing description */}
+            {product.seller_description && (
+              <div style={{ marginBottom: "16px" }}>
+                <div style={{ fontSize: "13px", fontWeight: "bold", color: "#0F1111", marginBottom: "4px" }}>
+                  About this item
+                </div>
+                <p style={{ fontSize: "13px", color: "#333", lineHeight: 1.5, margin: 0 }}>
+                  {product.seller_description}
+                </p>
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
               <button
                 onClick={handleAddNew}
@@ -239,6 +257,8 @@ export default function ProductPage() {
                   flag_type={warning.flag_type!}
                   return_count_for_reason={warning.return_count_for_reason!}
                   recommendation={warning.recommendation!}
+                  flag_source={warning.flag_source}
+                  evidence={warning.evidence}
                 />
               </div>
             )}

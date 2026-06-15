@@ -37,7 +37,7 @@ if str(SEED_DIR) not in sys.path:
 
 # Load .env before any AWS-dependent import (.env lives at project root, not backend/)
 from dotenv import load_dotenv
-load_dotenv(BACKEND_DIR.parent / ".env")
+load_dotenv(BACKEND_DIR / ".env")
 
 # ── AWS + app imports (after .env is loaded) ─────────────────────────────────
 from botocore.exceptions import ClientError
@@ -195,6 +195,51 @@ print("\n=== Step 5: Writing items to Items table ===")
 for item in items:
     serial_put("Items", {**item, "status": "pending"}, item["item_id"])
     print(f"  [OK] {item['item_id']}  {item['name']}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 5b — Reset the Items table to EXACTLY the seeded set
+# Removes anything not in items.json: prior live-return items (Adidas ITM-006,
+# Levi's ITM-009 list LIVE on return and must NOT pre-exist as listed), plus any
+# ITM-UPLOAD-*/P2P test debris from earlier runs. This keeps the demo repeatable
+# and the recommendation candidate sets clean before pre-warming.
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n=== Step 5b: Pruning stale Items not in seed ===")
+seed_item_ids = {i["item_id"] for i in items}
+items_tbl = table("Items")
+resp = items_tbl.scan(ProjectionExpression="item_id")
+stale = []
+while True:
+    for row in resp.get("Items", []):
+        iid = row["item_id"]
+        if iid not in seed_item_ids:
+            stale.append(iid)
+    last = resp.get("LastEvaluatedKey")
+    if not last:
+        break
+    resp = items_tbl.scan(ProjectionExpression="item_id", ExclusiveStartKey=last)
+for iid in stale:
+    items_tbl.delete_item(Key={"item_id": iid})
+    print(f"  [DEL] {iid}")
+print(f"  [OK] pruned {len(stale)} stale item(s); table now holds {len(seed_item_ids)} seeded items")
+
+# Clear ListingFlags so flags from prior live returns (e.g. the Adidas/Levi's
+# claim discrepancies) don't pre-exist before the demo. The legitimate flags
+# are rebuilt below: per-item flags by the orchestrator (Step 7) and the Nike
+# demo flag in Step 7c. Live-return listings get no flag until a return runs.
+flags_tbl = table("ListingFlags")
+fresp = flags_tbl.scan(ProjectionExpression="listing_id")
+cleared = 0
+with flags_tbl.batch_writer() as batch:
+    while True:
+        for row in fresp.get("Items", []):
+            batch.delete_item(Key={"listing_id": row["listing_id"]})
+            cleared += 1
+        last = fresp.get("LastEvaluatedKey")
+        if not last:
+            break
+        fresp = flags_tbl.scan(ProjectionExpression="listing_id", ExclusiveStartKey=last)
+print(f"  [OK] cleared {cleared} listing flag(s) — rebuilt from seeded items below")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

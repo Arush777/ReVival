@@ -2,19 +2,25 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 
 from agents.disposition import compute_disposition
+from agents.discrepancy import detect_claim_discrepancy
 from agents.grading import grade_item, grade_from_video
 from agents.green_credits import compute_credits
-from agents.matching import match_buyers
+from agents.matching import get_recommendations, match_buyers
 from agents.passport import generate_passport
 from agents.prevention import correct_listing, predict_listing_flag, write_listing_flag
 from agents.pricing import CITY_COORDS, haversine, recommend_circular_price
-from db.dynamo import batch_get, from_ddb, get_item, put_item, table, update_item
+from db.dynamo import batch_get, from_ddb, get_item, put_item, query_index, table, update_item
 from db.s3 import presign_passport, upload_photo
+
+# Active demo buyer — the homepage / recommendations are always viewed as this
+# buyer, so its recommendation cache must be re-warmed after a live listing.
+DEMO_BUYER_ID = os.environ.get("DEMO_BUYER_ID", "BUY-001")
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +139,55 @@ def append_credits_ledger(seller_id: str, credits_data: dict, item_id: str) -> N
     })
 
 
+def rewarm_recommendations_after_listing(item: dict) -> None:
+    """
+    A live return that lists a new item changes the demo buyer's candidate set,
+    which changes the recommendation cache key → a cold-cache 503 on the next
+    homepage load. Re-bake the cache so the new item shows up immediately and
+    the demo-mode warmth gate passes.
+
+    StatusCategoryIndex is a GSI (eventually consistent): the freshly-listed
+    item may not be visible the instant after update_item. We poll the index
+    until the item appears so the candidate set we bake matches the steady
+    state the warmth gate will compute, then call get_recommendations to
+    re-populate the no-cart cache key.
+    """
+    if item.get("status") != "listed":
+        return
+
+    item_id = item["item_id"]
+    category = item.get("category", "")
+
+    # Poll the GSI until the new item is visible (propagation is usually <1s).
+    for _ in range(10):
+        try:
+            rows = query_index(
+                "Items", "StatusCategoryIndex",
+                "status = :s AND category = :c",
+                {":s": "listed", ":c": category},
+            )
+        except Exception as exc:
+            logger.warning("re-warm index query failed: %s", exc)
+            break
+        if any(r.get("item_id") == item_id for r in rows):
+            break
+        time.sleep(0.5)
+    else:
+        logger.warning(
+            "re-warm: item %s not visible in StatusCategoryIndex after polling; "
+            "baking anyway (cache may be briefly cold)", item_id,
+        )
+
+    try:
+        recs = get_recommendations(DEMO_BUYER_ID)
+        logger.info(
+            "[re-warm] buyer=%s rebaked %d recs after listing item=%s",
+            DEMO_BUYER_ID, len(recs), item_id,
+        )
+    except Exception as exc:
+        logger.warning("re-warm get_recommendations failed for %s: %s", DEMO_BUYER_ID, exc)
+
+
 def notify_seller_stub(item_id: str, seller_id: str, event: str,
                        buyer_id=None, risk=None) -> None:
     logger.info(
@@ -167,6 +222,14 @@ def assemble_result(item: dict) -> dict:
         "passport_url": passport_url,
         "top_matches": top_matches,
         "warning_written": item.get("size_mismatch", False) or item.get("color_mismatch", False),
+        # Seller-vs-returner claim-discrepancy verdict, for the return result UI.
+        "seller_description": item.get("seller_description", ""),
+        "return_reason_text": item.get("return_reason_text", ""),
+        "returner_report": item.get("history_note", ""),
+        "claim_color_mismatch": item.get("claim_color_mismatch", False),
+        "claim_size_mismatch": item.get("claim_size_mismatch", False),
+        "claim_condition_mismatch": item.get("claim_condition_mismatch", False),
+        "claim_discrepancy_notes": item.get("claim_discrepancy_notes", ""),
     }
 
 
@@ -218,8 +281,27 @@ def _run_agents(item: dict, s3_keys: list[str], trade_in: bool, video_path: str 
         update_item_field(item, "passport_key", passport["passport_key"])
 
     # 10. Prevention (reactive: correct listing + write flag)
+    #
+    # Two complementary mismatch signals feed the listing flag:
+    #   * VISUAL — `grading` already compared the photos vs listed size/colour.
+    #   * CLAIM  — compare the seller's written description against what the
+    #              returner actually reported (text-vs-text). This catches a
+    #              colour/size/condition lie even when the photos look fine.
+    text_discrepancy = detect_claim_discrepancy(
+        item.get("seller_description", ""),
+        item.get("return_reason_text", ""),
+        item.get("return_reason_code", ""),
+        item.get("history_note", ""),  # returner's free-text comments land here
+    )
+    # Persist the claim-discrepancy verdict on the item for transparency/ops.
+    update_item_fields(item, {
+        "claim_color_mismatch": text_discrepancy["color_mismatch"],
+        "claim_size_mismatch": text_discrepancy["size_mismatch"],
+        "claim_condition_mismatch": text_discrepancy["condition_mismatch"],
+        "claim_discrepancy_notes": text_discrepancy["notes"],
+    })
     correct_listing(item, grading)
-    write_listing_flag(item, grading)
+    write_listing_flag(item, grading, text_discrepancy=text_discrepancy)
 
     # 11. Final status
     final_status = (
@@ -299,19 +381,29 @@ def process_return(payload: dict, photo_paths: list[str], trade_in: bool = False
             else "Minor defects noted by AI grading"
         )
 
+        # Honor the SELLER's asking price. The AI recommendation is only a
+        # suggestion shown in the UI — never an auto-applied override. Fall back
+        # to the recommendation only if the seller gave no price.
+        seller_price = item.get("listing_price_inr")
+        final_price = int(seller_price) if seller_price else price_data["recommended_price"]
+
         updates = {
             "disposition": "resell",
             "listing_type": "defective_deal",
             "listing_notes": f"Defective - Certified Deal: {defect_notes}",
-            "base_price_inr": price_data["recommended_price"],
+            "base_price_inr": final_price,
             "status": "listed",
             "replacement_queued": True,
         }
         update_item_fields(item, updates)
         logger.info(
-            "[replace-with-resale] item=%s grade=%s defective_price=%d notes=%r",
-            item["item_id"], grade, price_data["recommended_price"], defect_notes,
+            "[replace-with-resale] item=%s grade=%s seller_price=%s rec_price=%d final=%d notes=%r",
+            item["item_id"], grade, seller_price, price_data["recommended_price"], final_price, defect_notes,
         )
+
+    # Re-warm the demo buyer's recommendation cache so a freshly-listed item
+    # appears on the homepage immediately (and avoids a cold-cache 503).
+    rewarm_recommendations_after_listing(item)
 
     return assemble_result(item)
 

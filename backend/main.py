@@ -309,6 +309,18 @@ async def get_buyers(
     }
 
 
+# Demo order history for BUY-001.
+#
+# `seller_description` is the seller's ORIGINAL listing claim — it rides into
+# the return payload so the AI discrepancy agent can compare it against what
+# the returner reports (text-vs-text).
+#
+# Two items (Adidas ITM-006, Levi's ITM-009) intentionally use item_id =
+# the catalog hero's `second_life_item_id` and listing_id = the catalog hero's
+# `listing_id`. Those items are NOT pre-seeded as listed, so returning one
+# creates exactly the item the product page references — demonstrating the full
+# return → grade → list pipeline live. Their seller_description sets up a
+# deliberate discrepancy (Adidas → colour, Levi's → size).
 _ORDER_HISTORY: dict = {
     "BUY-001": [
         {
@@ -322,6 +334,20 @@ _ORDER_HISTORY: dict = {
             "listed_size": "US 10",
             "listed_color": "black",
             "original_price_inr": 9999,
+            "seller_description": "Nike Air Max 270 in classic Black colourway, US 10. True-to-size road running shoe with the oversized Air heel unit and breathable engineered-mesh upper.",
+        },
+        {
+            "order_id": "402-9007781-4521190",
+            "order_date": "2024-10-28",
+            "item_id": "ITM-006",
+            "listing_id": "LST-ADI-ULTRA-9",
+            "name": "Adidas Ultraboost 22 Running Shoes",
+            "brand": "Adidas",
+            "category": "shoes",
+            "listed_size": "UK 8",
+            "listed_color": "white",
+            "original_price_inr": 12999,
+            "seller_description": "Adidas Ultraboost 22 in Cloud White colourway, UK 8. Premium BOOST midsole, Primeknit+ upper and Continental rubber outsole. Brand new in box, true to size.",
         },
         {
             "order_id": "402-6541230-9876543",
@@ -334,6 +360,20 @@ _ORDER_HISTORY: dict = {
             "listed_size": "M",
             "listed_color": "olive",
             "original_price_inr": 1499,
+            "seller_description": "H&M Regular Fit Cotton T-Shirt in Olive Green, size M. 100% combed cotton, ribbed crew neck, true to size.",
+        },
+        {
+            "order_id": "402-8899001-2233445",
+            "order_date": "2024-08-07",
+            "item_id": "ITM-009",
+            "listing_id": "LST-LEVI-512-32",
+            "name": "Levi's 512 Slim Taper Jeans",
+            "brand": "Levi's",
+            "category": "jeans",
+            "listed_size": "32x30",
+            "listed_color": "dark blue",
+            "original_price_inr": 3999,
+            "seller_description": "Levi's 512 Slim Taper Jeans, 32x30, in a Dark Blue wash. True to size with a slim fit through the thigh tapering to the ankle. Brand new with tags.",
         },
         {
             "order_id": "402-1122334-5566778",
@@ -346,18 +386,7 @@ _ORDER_HISTORY: dict = {
             "listed_size": "one-size",
             "listed_color": "black",
             "original_price_inr": 1899,
-        },
-        {
-            "order_id": "402-8899001-2233445",
-            "order_date": "2024-08-07",
-            "item_id": "ORD-004",
-            "listing_id": "LST-LEVI-512-BLUE-32",
-            "name": "Levi's 512 Slim Taper Jeans",
-            "brand": "Levi's",
-            "category": "jeans",
-            "listed_size": "32x30",
-            "listed_color": "blue",
-            "original_price_inr": 3999,
+            "seller_description": "WildCraft 30L Laptop Backpack in Black. Padded sleeve fits laptops up to 15.6-inch, water-resistant fabric, multiple compartments.",
         },
         {
             "order_id": "402-5544332-1122009",
@@ -370,6 +399,7 @@ _ORDER_HISTORY: dict = {
             "listed_size": "one-size",
             "listed_color": "black",
             "original_price_inr": 2499,
+            "seller_description": "boAt Rockerz 500 Bluetooth headphones in Black. Over-ear design, 20-hour playback, deep bass. Brand new, factory sealed.",
         },
     ]
 }
@@ -378,7 +408,11 @@ _ORDER_HISTORY: dict = {
 @app.get("/buyers/{buyer_id}/orders")
 async def get_buyer_orders(buyer_id: str):
     orders = _ORDER_HISTORY.get(buyer_id, [])
-    return {"buyer_id": buyer_id, "orders": orders}
+    # Hide orders that have already been returned — once an order's item exists
+    # in the Items table (a return created it), it should no longer be
+    # selectable for return.
+    visible = [o for o in orders if not get_item("Items", {"item_id": o["item_id"]})]
+    return {"buyer_id": buyer_id, "orders": visible}
 
 
 @app.get("/buyers/{buyer_id}")
@@ -422,13 +456,14 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10, cart: str = 
         candidates = candidates[:50]
 
         sorted_ids = json.dumps(sorted(i["item_id"] for i in candidates))
-        cart_key_str = json.dumps(sorted(cart_item_ids))
-        secondary = f"{sorted_ids}||cart:{cart_key_str}"
-        cache_key = make_cache_key(
-            "recommendations", buyer_id.encode(), secondary, "v2",
+
+        # Seed pre-warms with empty cart — check that base cache is warm.
+        no_cart_secondary = f"{sorted_ids}||cart:{json.dumps([])}"
+        no_cart_cache_key = make_cache_key(
+            "recommendations", buyer_id.encode(), no_cart_secondary, "v2",
             os.environ["BEDROCK_TEXT_MODEL_ID"],
         )
-        if not cache_get(cache_key):
+        if not cache_get(no_cart_cache_key):
             return JSONResponse(
                 status_code=503,
                 content={"error": {
@@ -437,6 +472,16 @@ async def get_buyer_recommendations(buyer_id: str, limit: int = 10, cart: str = 
                     "details": {},
                 }},
             )
+
+        # If cart-aware cache hasn't been populated, fall back to no-cart to avoid a Bedrock call.
+        if cart_item_ids:
+            cart_secondary = f"{sorted_ids}||cart:{json.dumps(sorted(cart_item_ids))}"
+            cart_cache_key = make_cache_key(
+                "recommendations", buyer_id.encode(), cart_secondary, "v2",
+                os.environ["BEDROCK_TEXT_MODEL_ID"],
+            )
+            if not cache_get(cart_cache_key):
+                cart_item_ids = []
 
     items = _get_recommendations(buyer_id, limit, cart_item_ids=cart_item_ids or None)
     # Remove items the buyer themselves listed for sale

@@ -6,7 +6,7 @@ import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 REGION = os.environ["AWS_DEFAULT_REGION"]
 TABLE_PREFIX = os.environ.get("DDB_TABLE_PREFIX", "SecondLife")

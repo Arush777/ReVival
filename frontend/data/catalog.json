@@ -11,7 +11,8 @@
       "ratings_count": 2341,
       "image": "/catalog/ITM_001/front.jpg",
       "listing_id": "LST-NIKE-AIR-270-BLK-10",
-      "second_life_item_id": "ITM-001"
+      "second_life_item_id": "ITM-001",
+      "seller_description": "Nike Air Max 270 in classic Black colourway, US 10. True-to-size road running shoe with the oversized Air heel unit and breathable engineered-mesh upper."
     },
     {
       "catalog_id": "OP-11R",
@@ -24,7 +25,8 @@
       "ratings_count": 8714,
       "image": "/catalog/ITM_005/front.jpg",
       "listing_id": "LST-ONEPLUS-11R",
-      "second_life_item_id": "ITM-005"
+      "second_life_item_id": "ITM-005",
+      "seller_description": "OnePlus 11R 5G in Sonic Black, 16GB RAM + 256GB storage. Snapdragon 8+ Gen 1, 120Hz AMOLED display and 100W fast charging."
     },
     {
       "catalog_id": "AD-UB22",
@@ -37,7 +39,8 @@
       "ratings_count": 1576,
       "image": "/catalog/ITM_006/front.jpg",
       "listing_id": "LST-ADI-ULTRA-9",
-      "second_life_item_id": "ITM-006"
+      "second_life_item_id": "ITM-006",
+      "seller_description": "Adidas Ultraboost 22 in Cloud White colourway, UK 8. Premium BOOST midsole, Primeknit+ upper and Continental rubber outsole. True to size."
     },
     {
       "catalog_id": "HM-TEE",
@@ -50,7 +53,8 @@
       "ratings_count": 932,
       "image": "/catalog/ITM_002/front.jpg",
       "listing_id": "LST-HM-SHIRT-RED-M",
-      "second_life_item_id": "ITM-002"
+      "second_life_item_id": "ITM-002",
+      "seller_description": "H&M Regular Fit Cotton T-Shirt in bright Red, size M. 100% combed cotton, ribbed crew neck, true to size."
     },
     {
       "catalog_id": "LV-512",
@@ -63,7 +67,8 @@
       "ratings_count": 4103,
       "image": "/catalog/ITM_009/front.jpg",
       "listing_id": "LST-LEVI-512-32",
-      "second_life_item_id": "ITM-009"
+      "second_life_item_id": "ITM-009",
+      "seller_description": "Levi's 512 Slim Taper Jeans, 32x30, in a Dark Blue wash. True to size with a slim fit through the thigh tapering to the ankle."
     }
   ],
   "filler": [
