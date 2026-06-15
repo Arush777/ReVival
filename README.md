@@ -66,9 +66,9 @@ The same pipeline runs for **community P2P listings** — a seller-listed item p
 - **FastAPI** + **boto3** on Python 3.12
 - **7 agents** — 3 call AWS Bedrock (vision grading, LLM matching, LLM passport); 4 are pure deterministic code
 - **AWS Bedrock** for AI calls — vision model for grading (Qwen 3 VL 235B / Claude Sonnet 4.6), text model for matching + passport (Mistral Large 3 / Claude Haiku 4.5)
-- **DynamoDB** — 6 tables (Items, Buyers, BuyerInterestIndex, ListingFlags, CreditsLedger, GradeCache)
+- **DynamoDB** — 7 tables (Items, Buyers, BuyerInterestIndex, ListingFlags, CreditsLedger, GradeCache, ImageVectorCache)
 - **S3** — 2 buckets (photos, passports)
-- **Deterministic caching** — every Bedrock call is cached by SHA-256 of canonical inputs; same input always returns same grade, zero inference cost on repeat calls or demo runs
+- **Hybrid AI caching** — image agents use Amazon Titan Multimodal Embeddings (`amazon.titan-embed-image-v1`) in `ImageVectorCache` for cosine-similarity hits; text-only agents keep deterministic cache keys in `GradeCache`
 
 ### Frontend
 
@@ -129,6 +129,12 @@ BEDROCK_VISION_MODEL_ID=qwen.qwen3-vl-235b-a22b
 # or: anthropic.claude-sonnet-4-6
 BEDROCK_TEXT_MODEL_ID=mistral.mistral-large-3-675b-instruct
 # or: anthropic.claude-haiku-4-5-20251001-v1:0
+BEDROCK_IMAGE_EMBED_MODEL_ID=amazon.titan-embed-image-v1
+IMAGE_EMBEDDING_DIMENSIONS=256
+IMAGE_CACHE_SIMILARITY_THRESHOLD=0.985
+
+# Financial recovery metrics
+GENERAL_ECOMMERCE_AOV_INR=1000              # clamped to the realistic ₹800–1,200 band
 
 # DynamoDB (tables are prefixed, e.g. SecondLifeItems)
 DDB_TABLE_PREFIX=SecondLife
@@ -187,7 +193,7 @@ NEXT_PUBLIC_DEMO_BUYER_ID=BUY-001
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/ops/items` | Ops dashboard feed: `?status=&limit=`. Returns evidence, confidence_bucket, wear_level, rubric_version, grader_input_hash |
+| `GET` | `/ops/items` | Ops dashboard feed: `?status=&limit=`. Returns evidence, confidence_bucket, wear_level, rubric_version, image embedding cache metadata, and AOV-grounded recovery metrics |
 | `POST` | `/credits/redeem` | Buyer redeems credits at checkout (max 20% of item price); writes CreditsLedger row |
 | `POST` | `/notify-seller` | Fire-and-forget seller notification stub |
 
@@ -218,9 +224,9 @@ Runs AI vision on photos or video to assign a condition grade.
 - Electronics with `functional_status = unknown` → REVIEW
 - Unsealed hygiene/food item → REVIEW
 
-**Outputs:** `grade`, `raw_llm_grade`, `grade_bucket`, `confidence_bucket`, `defects[]`, `wear_level`, `functional_status`, `detected_color`, `detected_size`, `size_mismatch`, `color_mismatch`, `mismatch_notes`, `evidence[]`, `rubric_version`, `grader_input_hash`
+**Outputs:** `grade`, `raw_llm_grade`, `grade_bucket`, `confidence_bucket`, `defects[]`, `wear_level`, `functional_status`, `detected_color`, `detected_size`, `size_mismatch`, `color_mismatch`, `mismatch_notes`, `evidence[]`, `rubric_version`, `image_embedding_cache_id`, `image_embedding_model_id`, `image_similarity_score`, `image_similarity_threshold`
 
-**Determinism guarantee:** images are canonicalised (EXIF, RGB JPEG, max 1600px, q=85), combined with stable metadata, SHA-256 hashed, and looked up in GradeCache before any Bedrock call.
+**Similarity-cache guarantee:** images are canonicalised (EXIF, RGB JPEG, max 1600px, q=85), embedded through Amazon Titan Multimodal Embeddings, and looked up in `ImageVectorCache` by cosine similarity before any grading/audit Bedrock call. Stable item/listing metadata remains an exact guardrail so visually similar products do not reuse results across different return context.
 
 **Three entry points:**
 - `grade_item(item, s3_keys)` — orchestrator path (downloads from S3)
@@ -241,7 +247,15 @@ Pure deterministic routing — no LLM.
 | D | recycle | recycle |
 | REVIEW | manual_review | manual_review |
 
-Trade-in flag upgrades A/B → exchange. Recovery value = `original_price × {A:0.70, B:0.55, C:0.35, D:0.05}`.
+Trade-in flag upgrades A/B → exchange. Item resale value = `original_price × {A:0.70, B:0.55, C:0.35, D:0.05}` and is used for listing/trade-in economics.
+
+Portfolio recovery metrics are grounded separately on a realistic general e-commerce AOV:
+
+```
+portfolio_recovered_value = GENERAL_ECOMMERCE_AOV_INR × grade_factor
+default GENERAL_ECOMMERCE_AOV_INR = ₹1,000
+allowed realistic band = ₹800–1,200
+```
 
 ---
 
@@ -317,7 +331,7 @@ Generates an honest, human-readable condition report via LLM.
 
 **Four text fields:** `summary`, `condition_statement`, `why_returned`, `buyer_reassurance`
 
-Fields are written directly onto the Item DynamoDB record (`passport_summary`, `passport_condition`, `passport_why_returned`, `passport_reassurance`) at generation time. The `/items/{id}/passport` endpoint reads stored fields directly — avoids the SHA-256 reconstruction bug where `Decimal('2.0')` round-tripped from DynamoDB as `int(2)`, causing hash mismatch and `passport: null`. Cache reconstruction kept as fallback for legacy items.
+Fields are written directly onto the Item DynamoDB record (`passport_summary`, `passport_condition`, `passport_why_returned`, `passport_reassurance`) at generation time. The `/items/{id}/passport` endpoint reads stored fields directly, avoiding brittle cache-key reconstruction when DynamoDB number types round-trip differently. Cache reconstruction remains only as a fallback for legacy items.
 
 The rendered S3 HTML shows `Verified by: AI Vision Model · AWS Bedrock` (not the raw Bedrock model ID).
 
@@ -344,7 +358,8 @@ Pure deterministic — no LLM.
 | `{prefix}BuyerInterestIndex` | `category` | `region#buyer_id` | Stage-1 match index: fast scan of buyers per category+region |
 | `{prefix}ListingFlags` | `listing_id` | — | Mismatch flags for PDP prevention widget |
 | `{prefix}CreditsLedger` | `buyer_id` | `{timestamp}#{item_id}#{action}` | Append-only credits history |
-| `{prefix}GradeCache` | `cache_key` | — | SHA-256-keyed LLM output cache (grading, matching, passport) |
+| `{prefix}GradeCache` | `cache_key` | — | Deterministic text/cache-control output cache for matching, passport, and legacy reads |
+| `{prefix}ImageVectorCache` | `vector_id` | — | Titan image embeddings + cached image-agent outputs for similarity search |
 
 ### S3 Buckets
 
@@ -379,7 +394,7 @@ Pure deterministic — no LLM.
 | `AmazonHeader` | Navigation bar with cart count and buyer points badge |
 | `RecommendationCard` | Item card with grade badge, XAI "why this fits" inline expand, add-to-cart |
 | `AIGradingEvidence` | Collapsible AI inspection report: evidence[], defect scan with severity badges, size/colour verification, 7-factor risk formula breakdown, audit trail |
-| `TrustPassport` | Passport modal with condition report + "How AI verified this" expandable section (raw evidence, model, confidence, input hash) |
+| `TrustPassport` | Passport modal with condition report + "How AI verified this" expandable section (raw evidence, model, confidence, embedding match) |
 | `PreventionBadge` | PDP warning chip ("Runs small — N buyers found this") |
 | `CreditsRedemption` | Credits discount calculator (≤20% of item price) |
 | `GreenImpact` | CO₂ saved + credits earned pill |
@@ -392,12 +407,12 @@ Pure deterministic — no LLM.
 
 The seed script (`backend/seed/seed.py`) is idempotent and runs in 8 steps:
 
-1. Create all 6 DynamoDB tables + 2 S3 buckets
+1. Create all 7 DynamoDB tables + 2 S3 buckets
 2. Validate reference JSON files
 3. Write 30 buyers → `Buyers` + `BuyerInterestIndex`
 4. Write 15 items → `Items` (status = pending)
 5. Upload local seed photos (`seed/ITM_XXX/`) to S3
-6. Run `process_existing_item()` per item → grades, routes, generates passports, populates GradeCache
+6. Run `process_existing_item()` per item → grades, routes, generates passports, populates GradeCache and ImageVectorCache
 7. Pre-warm recommendation cache for every buyer
 8. Print summary + verify cache hit latency < 100ms
 
@@ -459,7 +474,7 @@ ReVival/
 ├── backend/
 │   ├── main.py                     # FastAPI app — all routes
 │   ├── orchestrator.py             # Agent pipeline runner + video thumbnail extraction
-│   ├── cache.py                    # SHA-256-keyed DynamoDB cache
+│   ├── cache.py                    # deterministic text cache + Titan image vector cache
 │   ├── agents/
 │   │   ├── grading.py              # AI vision grading (photos + video, 3 entry points)
 │   │   ├── disposition.py          # Deterministic routing
@@ -513,7 +528,7 @@ ReVival/
 |--|--|
 | API endpoints | 25+ |
 | Agents | 7 (3 LLM, 4 deterministic) |
-| DynamoDB tables | 6 |
+| DynamoDB tables | 7 |
 | S3 buckets | 2 |
 | Seed buyers | 30 |
 | Seed items | 15 |

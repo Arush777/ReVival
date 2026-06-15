@@ -3,7 +3,7 @@
 seed.py — run once before demo.
 
 Steps:
-  1.  Create all 6 DynamoDB tables + S3 buckets (idempotent)
+  1.  Create all 7 DynamoDB tables + S3 buckets (idempotent)
   2.  Load + validate reference JSONs, buyers.json, items.json
   3.  Write 30 buyers → Buyers table
   4.  Write one row per category interest → BuyerInterestIndex
@@ -83,21 +83,28 @@ def serial_put(logical_table: str, item: dict, desc: str = "") -> None:
 print("\n=== Step 1: Creating DynamoDB tables + S3 buckets ===")
 create_tables.main()
 
-if FRESH:
-    print("\n--- --fresh: clearing GradeCache (forces full re-bake) ---")
-    gc = table("GradeCache")
+def clear_table(logical_table: str, key_field: str) -> int:
+    tbl = table(logical_table)
     scanned = 0
-    resp = gc.scan(ProjectionExpression="cache_key")
-    with gc.batch_writer() as batch:
+    resp = tbl.scan(ProjectionExpression=key_field)
+    with tbl.batch_writer() as batch:
         while True:
             for row in resp.get("Items", []):
-                batch.delete_item(Key={"cache_key": row["cache_key"]})
+                batch.delete_item(Key={key_field: row[key_field]})
                 scanned += 1
             last = resp.get("LastEvaluatedKey")
             if not last:
                 break
-            resp = gc.scan(ProjectionExpression="cache_key", ExclusiveStartKey=last)
-    print(f"  [OK] cleared {scanned} cache entries")
+            resp = tbl.scan(ProjectionExpression=key_field, ExclusiveStartKey=last)
+    return scanned
+
+
+if FRESH:
+    print("\n--- --fresh: clearing AI caches (forces full re-bake) ---")
+    grade_count = clear_table("GradeCache", "cache_key")
+    vector_count = clear_table("ImageVectorCache", "vector_id")
+    print(f"  [OK] cleared {grade_count} deterministic cache entries")
+    print(f"  [OK] cleared {vector_count} image vector cache entries")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

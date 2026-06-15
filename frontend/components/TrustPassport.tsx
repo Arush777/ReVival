@@ -11,7 +11,11 @@ interface TrustPassportProps {
   evidence?: string[];
   rubric_version?: string;
   grader_model?: string;
-  grader_input_hash?: string;
+  image_embedding_cache_id?: string;
+  image_embedding_model_id?: string;
+  image_similarity_score?: number;
+  image_similarity_threshold?: number;
+  image_cache_hit?: boolean;
   confidence_bucket?: string;
 }
 
@@ -49,7 +53,11 @@ export default function TrustPassport({
   evidence,
   rubric_version,
   grader_model,
-  grader_input_hash,
+  image_embedding_cache_id,
+  image_embedding_model_id,
+  image_similarity_score,
+  image_similarity_threshold,
+  image_cache_hit,
   confidence_bucket,
 }: TrustPassportProps) {
   const [open, setOpen] = useState(false);
@@ -286,9 +294,20 @@ export default function TrustPassport({
                         {grader_model && <span>Model: {grader_model}</span>}
                         {rubric_version && <span>Rubric: {rubric_version}</span>}
                         {confidence_bucket && <span>Confidence: {confidence_bucket}</span>}
-                        {grader_input_hash && (
-                          <span title="Fingerprint of the exact photos/frames the AI graded">
-                            Hash: {grader_input_hash.slice(0, 12)}…
+                        {image_embedding_cache_id && (
+                          <span title="Titan multimodal embedding vector used for visual similarity cache lookup">
+                            Embedding: {image_embedding_cache_id.split("#").pop()?.slice(0, 12)}…
+                          </span>
+                        )}
+                        {image_similarity_score ? (
+                          <span title={`Cache threshold ${(image_similarity_threshold ?? 0) * 100}%`}>
+                            Similarity: {(image_similarity_score * 100).toFixed(1)}%
+                            {image_cache_hit ? " cache hit" : " indexed"}
+                          </span>
+                        ) : null}
+                        {image_embedding_model_id && (
+                          <span title={image_embedding_model_id}>
+                            Vector model: {image_embedding_model_id}
                           </span>
                         )}
                       </div>

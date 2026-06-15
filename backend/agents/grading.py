@@ -1,4 +1,3 @@
-import hashlib
 import io
 import json
 import os
@@ -9,7 +8,7 @@ import tempfile
 import boto3
 from PIL import Image, ImageOps
 
-from cache import make_cache_key, cache_get, cache_put
+from cache import embed_image_set, image_vector_cache_get, image_vector_cache_put
 
 MODEL_ID = os.environ["BEDROCK_VISION_MODEL_ID"]
 RUBRIC_VERSION = "v2-condition-rubric"
@@ -30,6 +29,7 @@ _STABLE_FIELDS = [
     "return_reason_code", "return_reason_text",
     "history_note", "seller_claimed_condition",
 ]
+_VECTOR_CACHE_METADATA_FIELDS = [f for f in _STABLE_FIELDS if f != "item_id"]
 
 _ref = os.path.join(os.path.dirname(__file__), "..", "seed", "reference")
 with open(os.path.join(_ref, "size_standard_map.json")) as _f:
@@ -109,6 +109,13 @@ def canonicalize_grade_input(item: dict, photo_bytes_by_name: dict[str, bytes]) 
     canonical_item_json = json.dumps(stable, sort_keys=True)
 
     return canonical_image_bytes, canonical_item_json
+
+
+def _vector_cache_metadata_signature(item: dict) -> str:
+    stable = {f: item.get(f) for f in _VECTOR_CACHE_METADATA_FIELDS}
+    if not stable.get("seller_claimed_condition"):
+        stable["seller_claimed_condition"] = "returned_open_box"
+    return json.dumps(stable, sort_keys=True)
 
 
 def finalize_grade(item: dict, obs: dict) -> str:
@@ -253,15 +260,17 @@ def _grade_from_bytes(item: dict, photo_bytes_by_name: dict[str, bytes]) -> dict
     """Core grading logic shared by S3-backed and local-path-backed entry points."""
     sorted_keys = sorted(photo_bytes_by_name.keys())
     canonical_images = [_process_single_image(photo_bytes_by_name[k]) for k in sorted_keys]
-    canonical_image_bytes = b"".join(canonical_images)
 
-    stable = {f: item.get(f) for f in _STABLE_FIELDS}
-    if not stable.get("seller_claimed_condition"):
-        stable["seller_claimed_condition"] = "returned_open_box"
-    canonical_item_json = json.dumps(stable, sort_keys=True)
+    cache_metadata = _vector_cache_metadata_signature(item)
 
-    cache_key = make_cache_key("grading", canonical_image_bytes, canonical_item_json, RUBRIC_VERSION, MODEL_ID)
-    cached = cache_get(cache_key)
+    image_embedding = embed_image_set(canonical_images)
+    cached = image_vector_cache_get(
+        "grading",
+        image_embedding,
+        cache_metadata,
+        RUBRIC_VERSION,
+        MODEL_ID,
+    )
     if cached:
         return cached
 
@@ -304,10 +313,6 @@ def _grade_from_bytes(item: dict, photo_bytes_by_name: dict[str, bytes]) -> dict
     final_grade = finalize_grade(item, obs)
     _normalize_size(item, obs)
 
-    grader_input_hash = hashlib.sha256(
-        canonical_image_bytes + canonical_item_json.encode()
-    ).hexdigest()
-
     result = {
         "grade": final_grade,
         "raw_llm_grade": raw_llm_grade,
@@ -328,11 +333,16 @@ def _grade_from_bytes(item: dict, photo_bytes_by_name: dict[str, bytes]) -> dict
         "rubric_version": RUBRIC_VERSION,
         "prompt_version": PROMPT_VERSION,
         "model_id": MODEL_ID,
-        "grader_input_hash": grader_input_hash,
     }
 
-    cache_put(cache_key, "grading", result)
-    return result
+    return image_vector_cache_put(
+        "grading",
+        image_embedding,
+        cache_metadata,
+        RUBRIC_VERSION,
+        MODEL_ID,
+        result,
+    )
 
 
 def grade_item(item: dict, photo_keys: list[str]) -> dict:
@@ -354,28 +364,21 @@ def grade_item_from_paths(item: dict, local_paths: list[str]) -> dict:
 
 def grade_from_video(item: dict, video_path: str) -> dict:
     """Grade an item by extracting frames from a local video file and running image grading."""
-    with open(video_path, "rb") as f:
-        video_bytes = f.read()
-
-    stable = {f: item.get(f) for f in _STABLE_FIELDS}
-    if not stable.get("seller_claimed_condition"):
-        stable["seller_claimed_condition"] = "returned_open_box"
-    canonical_item_json = json.dumps(stable, sort_keys=True)
-
-    cache_key = make_cache_key(
-        "grading_video",
-        video_bytes,
-        canonical_item_json,
-        RUBRIC_VERSION,
-        MODEL_ID,
-    )
-
-    cached = cache_get(cache_key)
-    if cached:
-        return cached
+    cache_metadata = _vector_cache_metadata_signature(item)
 
     frames = _extract_video_frames(video_path)
     canonical_images = [_process_single_image(fb) for fb in frames]
+    image_embedding = embed_image_set(canonical_images)
+    cached = image_vector_cache_get(
+        "grading_video",
+        image_embedding,
+        cache_metadata,
+        RUBRIC_VERSION,
+        MODEL_ID,
+    )
+    if cached:
+        return cached
+
     content = _build_user_content(item, canonical_images)
 
     raw_resp = _bedrock.converse(
@@ -415,10 +418,6 @@ def grade_from_video(item: dict, video_path: str) -> dict:
     final_grade = finalize_grade(item, obs)
     _normalize_size(item, obs)
 
-    grader_input_hash = hashlib.sha256(
-        video_bytes + canonical_item_json.encode()
-    ).hexdigest()
-
     result = {
         "grade": final_grade,
         "raw_llm_grade": raw_llm_grade,
@@ -439,8 +438,13 @@ def grade_from_video(item: dict, video_path: str) -> dict:
         "rubric_version": RUBRIC_VERSION,
         "prompt_version": PROMPT_VERSION,
         "model_id": MODEL_ID,
-        "grader_input_hash": grader_input_hash,
     }
 
-    cache_put(cache_key, "grading_video", result)
-    return result
+    return image_vector_cache_put(
+        "grading_video",
+        image_embedding,
+        cache_metadata,
+        RUBRIC_VERSION,
+        MODEL_ID,
+        result,
+    )

@@ -80,6 +80,8 @@ interface SellResult {
   grade: string;
   disposition: string;
   base_price_inr: number;
+  portfolio_recovered_value_inr?: number;
+  portfolio_recovery_basis_inr?: number;
   co2_saved_kg: number;
   credits: number;
   passport_url?: string;
@@ -784,6 +786,11 @@ export default function SellPage() {
                       )}
                     </div>
                   )}
+                  {result.portfolio_recovered_value_inr ? (
+                    <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
+                      Recovery metric: ₹{result.portfolio_recovered_value_inr.toLocaleString("en-IN")} on ₹{(result.portfolio_recovery_basis_inr ?? 1000).toLocaleString("en-IN")} AOV
+                    </div>
+                  ) : null}
                 </div>
               </>
             ) : (
@@ -824,6 +831,11 @@ export default function SellPage() {
                       AI recommended: ₹{priceRec.recommended_price.toLocaleString("en-IN")} (Grade {aiGrade} × demand {priceRec.demand_factor})
                     </div>
                   )}
+                  {result.portfolio_recovered_value_inr ? (
+                    <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
+                      Recovery metric: ₹{result.portfolio_recovered_value_inr.toLocaleString("en-IN")} on ₹{(result.portfolio_recovery_basis_inr ?? 1000).toLocaleString("en-IN")} AOV
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Trust Passport */}

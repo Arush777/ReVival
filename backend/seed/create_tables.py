@@ -76,6 +76,24 @@ TABLE_SPECS = [
         "AttributeDefinitions": [{"AttributeName": "cache_key", "AttributeType": "S"}],
     },
     {
+        "TableName": "ImageVectorCache",
+        "KeySchema": [{"AttributeName": "vector_id", "KeyType": "HASH"}],
+        "AttributeDefinitions": [
+            {"AttributeName": "vector_id", "AttributeType": "S"},
+            {"AttributeName": "agent", "AttributeType": "S"},
+            {"AttributeName": "created_at", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "AgentCreatedIndex",
+                "KeySchema": [
+                    {"AttributeName": "agent", "KeyType": "HASH"},
+                    {"AttributeName": "created_at", "KeyType": "RANGE"},
+                ],
+            },
+        ],
+    },
+    {
         "TableName": "ListingFlags",
         "KeySchema": [{"AttributeName": "listing_id", "KeyType": "HASH"}],
         "AttributeDefinitions": [{"AttributeName": "listing_id", "AttributeType": "S"}],

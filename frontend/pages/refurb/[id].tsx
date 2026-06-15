@@ -73,7 +73,12 @@ interface ItemData {
   mismatch_notes: string;
   rubric_version: string;
   grader_model: string;
-  grader_input_hash: string;
+  image_embedding_cache_id: string;
+  image_embedding_model_id: string;
+  image_embedding_dimensions: number;
+  image_similarity_score: number;
+  image_similarity_threshold: number;
+  image_cache_hit: boolean;
   video_graded: boolean;
 }
 
@@ -530,7 +535,11 @@ export default function RefurbPage() {
               evidence={item.evidence}
               rubric_version={item.rubric_version}
               grader_model={item.grader_model}
-              grader_input_hash={item.grader_input_hash}
+              image_embedding_cache_id={item.image_embedding_cache_id}
+              image_embedding_model_id={item.image_embedding_model_id}
+              image_similarity_score={item.image_similarity_score}
+              image_similarity_threshold={item.image_similarity_threshold}
+              image_cache_hit={item.image_cache_hit}
               confidence_bucket={item.confidence_bucket}
             />
           </div>
@@ -553,7 +562,11 @@ export default function RefurbPage() {
             mismatch_notes={item.mismatch_notes}
             rubric_version={item.rubric_version}
             grader_model={item.grader_model}
-            grader_input_hash={item.grader_input_hash}
+            image_embedding_cache_id={item.image_embedding_cache_id}
+            image_embedding_model_id={item.image_embedding_model_id}
+            image_similarity_score={item.image_similarity_score}
+            image_similarity_threshold={item.image_similarity_threshold}
+            image_cache_hit={item.image_cache_hit}
             video_graded={item.video_graded}
             grade={item.grade}
             matches={item.matches}

@@ -2,4 +2,6 @@
 __pycache__/
 *.pyc
 .venv/
-seed/reference/
+# NOTE: seed/reference/ MUST be included — agents read JSON from it at runtime.
+# Exclude only the bulky seed item photos, which are used for seeding, not runtime.
+seed/ITM_*/

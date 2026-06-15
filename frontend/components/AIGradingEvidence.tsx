@@ -45,7 +45,11 @@ export interface AIGradingEvidenceProps {
   mismatch_notes?: string;
   rubric_version?: string;
   grader_model?: string;
-  grader_input_hash?: string;
+  image_embedding_cache_id?: string;
+  image_embedding_model_id?: string;
+  image_similarity_score?: number;
+  image_similarity_threshold?: number;
+  image_cache_hit?: boolean;
   video_graded?: boolean;
   grade?: string;
   matches?: MatchWithFactors[];
@@ -102,7 +106,11 @@ export default function AIGradingEvidence({
   mismatch_notes,
   rubric_version,
   grader_model,
-  grader_input_hash,
+  image_embedding_cache_id,
+  image_embedding_model_id,
+  image_similarity_score,
+  image_similarity_threshold,
+  image_cache_hit,
   video_graded,
   grade,
   matches,
@@ -380,9 +388,20 @@ export default function AIGradingEvidence({
             }}
           >
             {rubric_version && <span>Rubric: {rubric_version}</span>}
-            {grader_input_hash && (
-              <span title="Fingerprint of the exact photo/video frames the AI graded — proves a real inspection occurred">
-                Input hash: {grader_input_hash.slice(0, 16)}…
+            {image_embedding_cache_id && (
+              <span title="Titan multimodal embedding vector used for visual similarity cache lookup">
+                Embedding: {image_embedding_cache_id.split("#").pop()?.slice(0, 12)}…
+              </span>
+            )}
+            {image_similarity_score ? (
+              <span title={`Cache threshold ${(image_similarity_threshold ?? 0) * 100}%`}>
+                Similarity: {(image_similarity_score * 100).toFixed(1)}%
+                {image_cache_hit ? " cache hit" : " indexed"}
+              </span>
+            ) : null}
+            {image_embedding_model_id && (
+              <span title={image_embedding_model_id}>
+                Vector model: {image_embedding_model_id}
               </span>
             )}
             {wear_level && <span>Wear: {wear_level}</span>}

@@ -7,7 +7,7 @@ from pathlib import Path
 import boto3
 from PIL import Image, ImageOps
 
-from cache import make_cache_key, cache_get, cache_put
+from cache import embed_image_set, image_vector_cache_get, image_vector_cache_put
 
 MODEL_ID = os.environ["BEDROCK_VISION_MODEL_ID"]
 AUDIT_VERSION = "v1-catalog-audit"
@@ -124,14 +124,14 @@ def audit_catalog_listing(
         sort_keys=True,
     )
 
-    cache_key = make_cache_key(
+    image_embedding = embed_image_set([canonical_image])
+    cached = image_vector_cache_get(
         "catalog_audit",
-        canonical_image,
+        image_embedding,
         canonical_text,
         AUDIT_VERSION,
         MODEL_ID,
     )
-    cached = cache_get(cache_key)
     if cached:
         return cached
 
@@ -187,5 +187,11 @@ def audit_catalog_listing(
         "confidence": obs.get("confidence", "low"),
     }
 
-    cache_put(cache_key, "catalog_audit", result)
-    return result
+    return image_vector_cache_put(
+        "catalog_audit",
+        image_embedding,
+        canonical_text,
+        AUDIT_VERSION,
+        MODEL_ID,
+        result,
+    )

@@ -102,6 +102,8 @@ interface ReturnResult {
   grade: string;
   disposition: string;
   base_price_inr: number;
+  portfolio_recovered_value_inr?: number;
+  portfolio_recovery_basis_inr?: number;
   co2_saved_kg: number;
   credits: number;
   trade_in_credit_inr?: number;
@@ -1104,6 +1106,12 @@ export default function ReturnPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
                   <InfoRow label="Grade" value={result.grade} />
                   <InfoRow label="Route" value={ROUTE_LABELS[result.disposition] ?? result.disposition} />
+                  {result.portfolio_recovered_value_inr ? (
+                    <InfoRow
+                      label="Recovery metric"
+                      value={`₹${result.portfolio_recovered_value_inr.toLocaleString("en-IN")} on ₹${(result.portfolio_recovery_basis_inr ?? 1000).toLocaleString("en-IN")} AOV`}
+                    />
+                  ) : null}
                   <InfoRow label="You earn" value={`${result.credits} green credits`} />
                   <InfoRow label="CO₂ saved" value={`${result.co2_saved_kg} kg ≈ ${Math.round((result.co2_saved_kg ?? 0) * 5)} km by car`} />
                 </div>

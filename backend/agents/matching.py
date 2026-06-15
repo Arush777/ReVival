@@ -380,7 +380,10 @@ def get_recommendations(
         hub = CITY_COORDS.get(item.get("return_hub_city", ""), [20.0, 78.0])
         dist_km = round(haversine(hub[0], hub[1], buyer["lat"], buyer["lng"]), 1)
 
-        base_price = item.get("recovered_value_inr", item.get("original_price_inr", 0))
+        base_price = item.get(
+            "base_price_inr",
+            item.get("recovered_value_inr", item.get("original_price_inr", 0)),
+        )
         price = buyer_price(buyer, base_price, item)
 
         credits_data = compute_credits(item, grading, dist_km)

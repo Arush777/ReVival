@@ -15,6 +15,11 @@ interface OpsItem {
   disposition: string;
   base_price_inr: number;
   original_price_inr: number;
+  portfolio_recovered_value_inr: number;
+  portfolio_recovery_basis_inr: number;
+  portfolio_recovery_aov_low_inr: number;
+  portfolio_recovery_aov_high_inr: number;
+  recovery_metric_basis: string;
   top_match_buyer_id: string;
   top_match_risk: number;
   top_match_why: string;
@@ -31,7 +36,12 @@ interface OpsItem {
   confidence_bucket: string;
   wear_level: string;
   rubric_version: string;
-  grader_input_hash: string;
+  image_embedding_cache_id: string;
+  image_embedding_model_id: string;
+  image_embedding_dimensions: number;
+  image_similarity_score: number;
+  image_similarity_threshold: number;
+  image_cache_hit: boolean;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -69,7 +79,7 @@ const DISPOSITION_LABELS: Record<string, string> = {
   manual_review: "Manual Review",
 };
 
-const GRADE_FACTORS: Record<string, number> = { A: 0.70, B: 0.55, C: 0.40, D: 0.20 };
+const RECOVERY_GRADE_FACTORS: Record<string, number> = { A: 0.70, B: 0.55, C: 0.35, D: 0.05, REVIEW: 0 };
 
 function riskColor(risk: number): { color: string; bg: string; label: string } {
   if (risk < 0.1) return { color: "#2d6a4f", bg: "#d8f3dc", label: "low risk" };
@@ -423,12 +433,21 @@ export default function OpsPage() {
                   <strong style={{ color: "#B12704" }}>
                     ₹{item.base_price_inr?.toLocaleString("en-IN") ?? "—"}
                   </strong>
-                  {item.original_price_inr > 0 && item.grade && GRADE_FACTORS[item.grade] && (
+                  {item.original_price_inr > 0 && item.grade && RECOVERY_GRADE_FACTORS[item.grade] !== undefined && (
                     <span style={{ color: "#888", fontSize: "11px", marginLeft: "4px" }}>
-                      ({Math.round(GRADE_FACTORS[item.grade] * 100)}% of ₹{item.original_price_inr.toLocaleString("en-IN")} MRP)
+                      ({Math.round((RECOVERY_GRADE_FACTORS[item.grade] ?? 0) * 100)}% item recovery factor)
                     </span>
                   )}
                 </span>
+                {item.portfolio_recovered_value_inr > 0 && (
+                  <span>
+                    Portfolio recovery:{" "}
+                    <strong>₹{item.portfolio_recovered_value_inr.toLocaleString("en-IN")}</strong>
+                    <span style={{ color: "#888", fontSize: "11px", marginLeft: "4px" }}>
+                      based on ₹{item.portfolio_recovery_basis_inr.toLocaleString("en-IN")} AOV
+                    </span>
+                  </span>
+                )}
                 {item.co2_saved_kg > 0 && (
                   <span style={{ color: "#2d6a4f" }}>
                     🌿 {item.co2_saved_kg} kg CO₂ saved
@@ -599,15 +618,27 @@ export default function OpsPage() {
                       )}
                       {item.grade && (
                         <div style={{ marginTop: "6px", color: "#555" }}>
-                          Grade {item.grade} → {Math.round((GRADE_FACTORS[item.grade] ?? 0.4) * 100)}% recovery factor
-                          {item.original_price_inr > 0 && ` → ₹${Math.round(item.original_price_inr * (GRADE_FACTORS[item.grade] ?? 0.4)).toLocaleString("en-IN")} recovered`}
+                          Grade {item.grade} → {Math.round((RECOVERY_GRADE_FACTORS[item.grade] ?? 0) * 100)}% recovery factor
+                          {item.portfolio_recovered_value_inr > 0 && (
+                            ` → ₹${item.portfolio_recovered_value_inr.toLocaleString("en-IN")} portfolio recovery on ₹${item.portfolio_recovery_basis_inr.toLocaleString("en-IN")} AOV`
+                          )}
                         </div>
                       )}
                       {/* Audit trail */}
-                      {(item.rubric_version || item.grader_input_hash) && (
+                      {(item.rubric_version || item.image_embedding_cache_id) && (
                         <div style={{ borderTop: "1px solid #dce8f5", marginTop: "8px", paddingTop: "6px", color: "#999", display: "flex", gap: "12px", flexWrap: "wrap" }}>
                           {item.rubric_version && <span>Rubric: {item.rubric_version}</span>}
-                          {item.grader_input_hash && <span>Hash: {item.grader_input_hash.slice(0, 12)}…</span>}
+                          {item.image_embedding_cache_id && (
+                            <span title="Titan multimodal embedding vector used for visual similarity cache lookup">
+                              Embedding: {item.image_embedding_cache_id.split("#").pop()?.slice(0, 12)}…
+                            </span>
+                          )}
+                          {item.image_similarity_score ? (
+                            <span title={`Cache threshold ${(item.image_similarity_threshold ?? 0) * 100}%`}>
+                              Similarity: {(item.image_similarity_score * 100).toFixed(1)}%
+                              {item.image_cache_hit ? " cache hit" : " indexed"}
+                            </span>
+                          ) : null}
                         </div>
                       )}
                     </div>
