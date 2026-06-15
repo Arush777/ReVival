@@ -108,10 +108,10 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
       setSuggestions(
         hits.map((p) => ({
           label: p.title,
-          item_id: p.catalog_id,
+          item_id: p.second_life_item_id ?? p.catalog_id,
           category: p.category,
           brand: p.brand,
-          href: `/product/${p.catalog_id}`,
+          href: p.second_life_item_id ? `/refurb/${p.second_life_item_id}` : `/search?q=${encodeURIComponent(p.title)}&mode=all`,
         }))
       );
     } else {
@@ -145,13 +145,9 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
 
   function handleModeChange(mode: "Second Life" | "All") {
     setSearchMode(mode);
-    if (query.length >= 2) {
-      fetchSuggestions(query, mode);
-      setShowSuggestions(true);
-    } else {
-      setSuggestions([]);
-      setShowSuggestions(false);
-    }
+    setSuggestions([]);
+    setShowSuggestions(false);
+    router.push(mode === "All" ? "/?mode=all" : "/");
   }
 
   const showSecondLifeNav = searchMode === "Second Life";
@@ -392,16 +388,14 @@ export default function AmazonHeader({ initialMode }: AmazonHeaderProps) {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "18px",
+              justifyContent: "space-evenly",
               padding: "6px 16px",
               maxWidth: "1400px",
               margin: "0 auto",
               fontSize: "13px",
-              flexWrap: "wrap",
             }}
           >
             <NavLink href="/" label="Second Life" />
-            <NavLink href="/product/NK-AM270" label="Original PDP" />
             <NavLink href="/sell" label="Sell Your Item" />
             <NavLink href="/return" label="Returns" />
             <NavLink href="/ops" label="Ops Dashboard" />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import AmazonHeader from "../components/AmazonHeader";
 import RecommendationCard, { RecommendationCardProps } from "../components/RecommendationCard";
 import CatalogCard from "../components/CatalogCard";
@@ -325,6 +326,10 @@ function TrendingTile({ item }: { item: RecommendationCardProps }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
+  const router = useRouter();
+  const modeParam = router.query.mode;
+  const initialMode: "Second Life" | "All" = modeParam === "all" ? "All" : "Second Life";
+
   const [personalised, setPersonalised] = useState<RecommendationCardProps[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -355,7 +360,7 @@ export default function HomePage() {
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#EAEDED", fontFamily: "Arial, sans-serif" }}>
-      <AmazonHeader />
+      <AmazonHeader initialMode={initialMode} />
       <BannerCarousel />
       <CategoryStrip />
 

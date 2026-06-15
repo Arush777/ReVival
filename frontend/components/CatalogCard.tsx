@@ -55,9 +55,13 @@ export default function CatalogCard({ product }: { product: CatalogProduct }) {
     };
   }, [product.second_life_item_id]);
 
+  const href = hasSecondLife && product.second_life_item_id
+    ? `/refurb/${product.second_life_item_id}`
+    : `/search?q=${encodeURIComponent(product.title)}&mode=all`;
+
   return (
     <Link
-      href={`/product/${product.catalog_id}`}
+      href={href}
       style={{
         backgroundColor: "white",
         borderRadius: "8px",
