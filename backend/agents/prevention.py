@@ -102,3 +102,42 @@ def write_listing_flag(item: dict, grading: dict, text_discrepancy: dict | None 
         "recommendation": recommendation,
         "last_item_id": item["item_id"],
     })
+
+
+def write_catalog_listing_flag(listing_id: str, catalog_id: str, audit: dict) -> None:
+    """
+    Write a ListingFlag for a new product listing where the AI detected a
+    description-vs-image mismatch.  Unlike write_listing_flag this is a
+    pre-purchase audit signal — there is no return count.
+
+    Only called when audit["has_mismatch"] is True and confidence != "low".
+    """
+    if not audit.get("has_mismatch") or audit.get("confidence") == "low":
+        return
+
+    raw_flag_type = audit.get("flag_type", "type")
+    flag_type = "color" if raw_flag_type == "color" else "condition"
+
+    detected = audit.get("detected", "")
+    claimed = audit.get("claimed", "")
+
+    if flag_type == "color":
+        recommendation = (
+            f"AI detected colour mismatch — photo shows {detected} "
+            f"but listing says {claimed}."
+        )
+    else:
+        recommendation = (
+            "AI detected a potential mismatch between the product photo "
+            "and the listing description."
+        )
+
+    put_item("ListingFlags", {
+        "listing_id": listing_id,
+        "flag_type": flag_type,
+        "flag_source": "listing_audit",
+        "evidence": audit.get("mismatch_description", ""),
+        "return_count_for_reason": 0,
+        "recommendation": recommendation,
+        "catalog_id": catalog_id,
+    })

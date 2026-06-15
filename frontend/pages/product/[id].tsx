@@ -19,7 +19,7 @@ interface WarningData {
   flag_type?: "size" | "color" | "condition";
   return_count_for_reason?: number;
   recommendation?: string;
-  flag_source?: "visual" | "claim" | "both";
+  flag_source?: "visual" | "claim" | "both" | "listing_audit";
   evidence?: string;
 }
 

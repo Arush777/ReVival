@@ -260,6 +260,64 @@ async def get_listing_warning(listing_id: str):
     return {"listing_id": listing_id, "has_warning": False}
 
 
+@app.post("/catalog/audit-listings")
+async def post_catalog_audit():
+    """
+    Run AI vision audits on all catalog products that have a seller_description
+    and listing_id.  Writes ListingFlags for detected mismatches.
+
+    Skips listings that already have a return-flow flag (flag_source != "listing_audit")
+    so that real buyer-report data is never overwritten by the pre-purchase audit.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    from agents.catalog_audit import audit_catalog_listing
+    from agents.prevention import write_catalog_listing_flag
+
+    catalog_path = _Path(__file__).resolve().parent.parent / "frontend" / "data" / "catalog.json"
+    with open(catalog_path) as f:
+        catalog = _json.load(f)
+
+    all_products = catalog.get("heroes", []) + catalog.get("filler", [])
+    results = {"audited": 0, "flagged": 0, "skipped_existing": 0, "skipped_no_desc": 0}
+
+    for product in all_products:
+        listing_id = product.get("listing_id")
+        seller_desc = product.get("seller_description")
+        if not listing_id or not seller_desc:
+            results["skipped_no_desc"] += 1
+            continue
+
+        existing = get_item("ListingFlags", {"listing_id": listing_id})
+        if existing and existing.get("flag_source") != "listing_audit":
+            results["skipped_existing"] += 1
+            continue
+
+        audit = audit_catalog_listing(
+            catalog_id=product["catalog_id"],
+            title=product["title"],
+            category=product.get("category", ""),
+            seller_description=seller_desc,
+            image_url=product["image"],
+        )
+        results["audited"] += 1
+
+        if audit["has_mismatch"] and audit["confidence"] != "low":
+            write_catalog_listing_flag(listing_id, product["catalog_id"], audit)
+            results["flagged"] += 1
+            logging.info(
+                "[catalog-audit] %s flagged: %s — %s",
+                product["catalog_id"], audit["flag_type"], audit["mismatch_description"],
+            )
+        else:
+            logging.info(
+                "[catalog-audit] %s clean (has_mismatch=%s confidence=%s)",
+                product["catalog_id"], audit["has_mismatch"], audit["confidence"],
+            )
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Demand-side endpoints (Anupam adds here in feat/api-demand)
 # ---------------------------------------------------------------------------

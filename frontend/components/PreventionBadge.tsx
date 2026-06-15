@@ -2,7 +2,7 @@ interface PreventionBadgeProps {
   flag_type: "size" | "color" | "condition";
   return_count_for_reason: number;
   recommendation: string;
-  flag_source?: "visual" | "claim" | "both";
+  flag_source?: "visual" | "claim" | "both" | "listing_audit";
   evidence?: string;
 }
 
@@ -28,8 +28,17 @@ export default function PreventionBadge({
   flag_source,
   evidence,
 }: PreventionBadgeProps) {
-  const alertLabel =
-    flag_type === "size" ? "FIT ALERT" : flag_type === "color" ? "COLOR ALERT" : "CONDITION ALERT";
+  const isListingAudit = flag_source === "listing_audit";
+
+  const alertLabel = isListingAudit
+    ? flag_type === "color"
+      ? "COLOR MISMATCH DETECTED"
+      : "LISTING MISMATCH DETECTED"
+    : flag_type === "size"
+    ? "FIT ALERT"
+    : flag_type === "color"
+    ? "COLOR ALERT"
+    : "CONDITION ALERT";
 
   const finding =
     flag_type === "size"
@@ -38,14 +47,13 @@ export default function PreventionBadge({
       ? "looks different in person"
       : "differs from the listing description";
 
-  // A claim-sourced flag means the seller's written listing disagreed with what
-  // a returner reported — call that out explicitly.
-  const sourceLine =
-    flag_source === "claim"
-      ? "Seller's listing description didn't match a returner's report."
-      : flag_source === "both"
-      ? "Confirmed by both AI photo inspection and a returner's report."
-      : "Based on verified return data — AI-analysed";
+  const sourceLine = isListingAudit
+    ? "AI listing audit · image vs. description check performed before purchase"
+    : flag_source === "claim"
+    ? "Seller's listing description didn't match a returner's report."
+    : flag_source === "both"
+    ? "Confirmed by both AI photo inspection and a returner's report."
+    : "Based on verified return data — AI-analysed";
 
   return (
     <div
@@ -69,13 +77,19 @@ export default function PreventionBadge({
           {alertLabel}
         </span>
       </div>
-      <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#333" }}>
-        {return_count_for_reason} buyer{return_count_for_reason === 1 ? "" : "s"} found this {finding}.
-      </p>
+      {isListingAudit ? (
+        <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#333" }}>
+          AI detected a potential mismatch before any purchases.
+        </p>
+      ) : (
+        <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#333" }}>
+          {return_count_for_reason} buyer{return_count_for_reason === 1 ? "" : "s"} found this {finding}.
+        </p>
+      )}
       <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "#555" }}>{recommendation}</p>
       {evidence && (
         <p style={{ margin: "0 0 4px 0", fontSize: "12px", color: "#666", fontStyle: "italic" }}>
-          "{evidence}"
+          &ldquo;{evidence}&rdquo;
         </p>
       )}
       <p style={{ margin: "0", fontSize: "11px", color: "#888" }}>{sourceLine}</p>

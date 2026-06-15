@@ -13,6 +13,7 @@ Steps:
   7b. Pre-warm recommendation cache for every buyer
   8.  Print summary table
   9.  Verify GET /buyers/BUY-001/recommendations latency < 100ms
+  10. Catalog listing audit — AI vision checks new-product descriptions vs images
 
 Run from backend/:
     python seed/seed.py
@@ -350,5 +351,68 @@ elif ms >= 100:
     print(f"  NOTE: {ms:.0f}ms reflects network RTT to {__import__('os').environ.get('AWS_DEFAULT_REGION','ap-south-1')} "
           "(buyer lookup + index queries + cache read, no Bedrock call). "
           "Sub-100ms applies to local/co-located DynamoDB.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 10 — Catalog listing audit (new-product prevention layer)
+# Run AI vision audit for every catalog product that has a seller_description
+# and listing_id. Writes ListingFlags with flag_source="listing_audit" for any
+# detected mismatch.  Return-flow flags already seeded above are not overwritten.
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n=== Step 10: Catalog listing audit (new-product prevention) ===")
+try:
+    from agents.catalog_audit import audit_catalog_listing
+    from agents.prevention import write_catalog_listing_flag
+
+    CATALOG_JSON = BACKEND_DIR.parent / "frontend" / "data" / "catalog.json"
+    with open(CATALOG_JSON) as _f:
+        _catalog = json.load(_f)
+
+    _all_products = _catalog.get("heroes", []) + _catalog.get("filler", [])
+    _audited = _flagged = _skipped = 0
+
+    for _prod in _all_products:
+        _lid = _prod.get("listing_id")
+        _desc = _prod.get("seller_description")
+        if not _lid or not _desc:
+            continue
+
+        _existing = get_item("ListingFlags", {"listing_id": _lid})
+        if _existing and _existing.get("flag_source") != "listing_audit":
+            _skipped += 1
+            continue
+
+        try:
+            _audit = audit_catalog_listing(
+                catalog_id=_prod["catalog_id"],
+                title=_prod["title"],
+                category=_prod.get("category", ""),
+                seller_description=_desc,
+                image_url=_prod["image"],
+            )
+            _audited += 1
+            if _audit["has_mismatch"] and _audit["confidence"] != "low":
+                write_catalog_listing_flag(_lid, _prod["catalog_id"], _audit)
+                _flagged += 1
+                print(
+                    f"  [FLAG] {_prod['catalog_id']:10s} "
+                    f"{_audit['flag_type']:8s} conf={_audit['confidence']}"
+                    f" — {_audit['mismatch_description'][:60]}"
+                )
+            else:
+                print(
+                    f"  [OK]   {_prod['catalog_id']:10s} "
+                    f"clean (mismatch={_audit['has_mismatch']} conf={_audit['confidence']})"
+                )
+        except Exception as _exc:
+            print(f"  [WARN] {_prod.get('catalog_id')}: {_exc}")
+
+    print(
+        f"  Audited {_audited} listings · "
+        f"flagged {_flagged} · "
+        f"skipped {_skipped} (return-flow flag exists)"
+    )
+except Exception as _top_exc:
+    print(f"  [ERROR] Step 10 failed: {_top_exc}")
+    traceback.print_exc()
 
 print("\n=== Seed complete ===\n")
